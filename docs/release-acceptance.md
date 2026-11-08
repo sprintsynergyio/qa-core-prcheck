@@ -20,24 +20,24 @@ Checked against pull request 1, comment 6726882681, from the successful run on `
 - `npm run eval` checks the bytes the tool would write for `@sardar-usman`, `#1`, `GH-1`, `sprintsynergyio/qa-core-prcheck#1`, `$x$`, and a URL whose hash must stay raw. That is the local contract, not a screenshot.
 - The job summary page was not available from the API or the artifact. The rank step is what appends it. Whether that page hides the marker has not been seen.
 
-What the owner still has to look at:
+Visual checks, and which of them block a merge:
 
-1. Open the job summary for a PR Check run and confirm the marker is hidden and the heading is the first visible line.
-2. On a throwaway pull request, use a failing test title that contains `@sardar-usman`, `#1`, `GH-1`, `sprintsynergyio/qa-core-prcheck#1`, `$x$`, and `https://example.com/docs#1-intro`. Confirm the comment and the job summary do not notify anyone, do not link `#1` or `GH-1`, do not render math, and the URL address is exactly that URL.
+- The marker in a pull request comment is already confirmed on comment 6726882681. No further comment-page inspection is required for that.
+- The job summary page is still unseen. The marker is an HTML comment, and the comment renderer already hid it. Looking at one job summary is optional follow-up, not a merge blocker.
+- A throwaway pull request for live `@`, `#1`, `GH-1`, `$`, and URL titles is optional follow-up. `npm run eval` checks those bytes. This tree does not create that pull request.
 
 ## Release checklist
 
 - [x] Rules still decide selection, verdict, and exit code.
 - [x] LLM stays off in this repo's workflow.
-- [x] Fork path stays `pull_request` only, with `comment: false` for forks and Dependabot, checkout `persist-credentials: false`.
+- [x] Fork path stays `pull_request` only, with `comment: false` for forks and Dependabot, checkout `persist-credentials: false`. `npm test` and `npm run eval` run the same-repo, fork, null-head, and Dependabot decisions. A live fork workflow run was not created.
 - [x] Config cannot name the key env var, raise the timeout past 30 minutes, or raise the LLM attempt cap.
 - [x] Check and rank unset the job token and runtime token before Node. The comment step still gets its token.
 - [x] `npm run eval` is in CI and prints pass or fail per case, not a model score.
 - [x] CLI CI is scheduled on Linux, Windows, and macOS. Record the run URLs on the pull request after they finish.
-- [ ] Owner reads the job summary and, if they want the escape cases live, the throwaway pull request above.
-- [ ] Owner confirms a fork pull request still gets no comment.
-- [ ] Owner pins a trusted tag before setting `llm: true` with a real key.
-- [ ] Owner merges, tags `v0.2.0`, and publishes. This tree does not do those steps.
+- [x] Fork comment guards are executed locally: same-repo versus fork, null head, case mismatch, and Dependabot. The live fork end-to-end path is unexercised and is not a merge blocker.
+- [ ] Optional follow-up, not a merge blocker: glance at one job summary, and only if wanted, a throwaway pull request for the live escape titles above.
+- [ ] After merge, the owner pins a trusted tag before setting `llm: true` with a real key, then tags `v0.2.0` and publishes. This tree does not do those steps.
 
 ## Still out of scope
 

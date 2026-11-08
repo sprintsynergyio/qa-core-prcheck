@@ -11,6 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { escapeText } from '../dist/report/markdown.js';
 import { SUMMARY_MARKER } from '../dist/report/summary.js';
+import { readPullRequestEvent } from '../dist/github/index.js';
+import { WORKFLOW_COMMENT_EXPR, commentStepRuns, workflowCommentInput } from '../tests/helpers/comment-policy.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const cli = path.join(root, 'dist', 'cli.js');
@@ -141,6 +143,70 @@ check('boundary: an oversized config exits 2 before Playwright', () => {
     const ran = run(['select', '--diff-file', path.join(diffs, 'empty.diff'), '--root', dir]);
     if (ran.status !== 2) throw new Error(`exit ${ran.status}: ${ran.stderr}`);
     if (!ran.stderr.includes('larger than 65536 bytes')) throw new Error(ran.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('fork guard: same-repo comments, a fork or a null head does not, Dependabot is workflow-only', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/prcheck.yml'), 'utf8');
+  const action = fs.readFileSync(path.join(root, 'action.yml'), 'utf8');
+  if (!workflow.includes(`comment: \${{ ${WORKFLOW_COMMENT_EXPR} }}`)) throw new Error('workflow comment expression changed');
+  if (workflow.includes('pull_request_target')) throw new Error('pull_request_target is present');
+  if (!action.includes("if: inputs.comment == 'true'")) throw new Error('comment step gate changed');
+  const base = 'demo-owner/demo-shop';
+  const rows = [
+    ['same-repo', base, 'sardar-usman', 'true', false],
+    ['fork', 'fork-owner/demo-shop', 'fork-owner', 'false', true],
+    ['null head', null, 'fork-owner', 'false', true],
+    ['dependabot', base, 'dependabot[bot]', 'false', false],
+  ];
+  for (const [name, head, actor, input, isFork] of rows) {
+    const commentInput = workflowCommentInput({ headFullName: head, repository: base, actor });
+    if (commentInput !== input) throw new Error(`${name} input ${commentInput}`);
+    if (commentStepRuns(commentInput) !== (input === 'true')) throw new Error(`${name} step`);
+    const event = {
+      pull_request: {
+        number: 7,
+        head: { repo: head === null ? null : { full_name: head } },
+        base: { repo: { full_name: base } },
+      },
+    };
+    if (readPullRequestEvent(event, 'pull_request').isFork !== isFork) throw new Error(`${name} isFork`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prcheck-eval-fork-'));
+  try {
+    fs.writeFileSync(path.join(dir, 's.md'), `${SUMMARY_MARKER}\n## PR Check: Passed\n`);
+    const eventPath = path.join(dir, 'event.json');
+    const runComment = (head) => {
+      fs.writeFileSync(eventPath, JSON.stringify({
+        pull_request: {
+          number: 7,
+          head: { repo: head === null ? null : { full_name: head } },
+          base: { repo: { full_name: base } },
+        },
+      }));
+      return spawnSync(process.execPath, [cli, 'comment', '--summary-file', 's.md'], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          GITHUB_TOKEN: 'ghs_eval_fork_guard',
+          GITHUB_REPOSITORY: base,
+          GITHUB_EVENT_NAME: 'pull_request',
+          GITHUB_EVENT_PATH: eventPath,
+          GITHUB_API_URL: 'http://127.0.0.1:1',
+        },
+      });
+    };
+    const fork = runComment('fork-owner/demo-shop');
+    if (fork.status !== 0 || fork.stdout !== 'Skipped: fork pull request, job summary only\n') {
+      throw new Error(`fork command ${fork.status} ${fork.stdout} ${fork.stderr}`);
+    }
+    const deleted = runComment(null);
+    if (deleted.status !== 0 || deleted.stdout !== 'Skipped: fork pull request, job summary only\n') {
+      throw new Error(`null head command ${deleted.status} ${deleted.stdout} ${deleted.stderr}`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
