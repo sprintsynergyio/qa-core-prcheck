@@ -33,16 +33,19 @@ test('mode none gives null', () => {
   assert.equal(buildPlaywrightArgs(selection('none', []), ROOT), null);
 });
 
+const resolved = (file) => path.resolve(ROOT, file);
+const fileFilter = (file) => `/^${resolved(file).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$/`;
+
 test('mode full gives the config, the JSON reporter and no file filter', () => {
   assert.deepEqual(buildPlaywrightArgs(selection('full', [CART, CHECKOUT]), ROOT), {
-    args: ['test', '--config', '/repo/demo/saucedemo', ...OPTIONS],
+    args: ['test', '--config', resolved('demo/saucedemo'), ...OPTIONS],
     display: ['test', '--config', 'demo/saucedemo', ...OPTIONS],
   });
 });
 
 test('mode subset with one spec gives one anchored filter, shown with <root>', () => {
   assert.deepEqual(buildPlaywrightArgs(selection('subset', [CART]), ROOT), {
-    args: ['test', '--config', '/repo/demo/saucedemo', ...OPTIONS, '/^/repo/demo/saucedemo/tests/cart/cart\\.spec\\.ts$/'],
+    args: ['test', '--config', resolved('demo/saucedemo'), ...OPTIONS, fileFilter(CART)],
     display: ['test', '--config', 'demo/saucedemo', ...OPTIONS, '/^<root>/demo/saucedemo/tests/cart/cart\\.spec\\.ts$/'],
   });
 });
@@ -50,9 +53,9 @@ test('mode subset with one spec gives one anchored filter, shown with <root>', (
 test('mode subset with two specs gives one filter per spec', () => {
   assert.deepEqual(buildPlaywrightArgs(selection('subset', [CART, CHECKOUT]), ROOT), {
     args: [
-      'test', '--config', '/repo/demo/saucedemo', ...OPTIONS,
-      '/^/repo/demo/saucedemo/tests/cart/cart\\.spec\\.ts$/',
-      '/^/repo/demo/saucedemo/tests/checkout/checkout\\.spec\\.ts$/',
+      'test', '--config', resolved('demo/saucedemo'), ...OPTIONS,
+      fileFilter(CART),
+      fileFilter(CHECKOUT),
     ],
     display: [
       'test', '--config', 'demo/saucedemo', ...OPTIONS,
@@ -79,13 +82,12 @@ test('the order of the selected list does not change the arguments', () => {
 
 test('every regular expression character in a path is escaped', () => {
   const file = 'demo/shop/tests/sale (50%)/price+tax[eu].spec.ts';
-  assert.deepEqual(buildPlaywrightArgs(selection('subset', [file], 'demo/shop'), ROOT).args.at(-1),
-    '/^/repo/demo/shop/tests/sale \\(50%\\)/price\\+tax\\[eu\\]\\.spec\\.ts$/');
+  assert.deepEqual(buildPlaywrightArgs(selection('subset', [file], 'demo/shop'), ROOT).args.at(-1), fileFilter(file));
 });
 
 test('a Playwright folder at the root shows as . and resolves to the root', () => {
   assert.deepEqual(buildPlaywrightArgs(selection('full', ['tests/cart.spec.ts'], '.'), ROOT), {
-    args: ['test', '--config', '/repo', ...OPTIONS],
+    args: ['test', '--config', path.resolve(ROOT), ...OPTIONS],
     display: ['test', '--config', '.', ...OPTIONS],
   });
 });
@@ -103,8 +105,17 @@ const matches = (arg, file) => suiteUtils.createFiltersFromArguments([arg]).file
 
 test("Playwright's own filter matches the built argument against the selected file only", () => {
   const arg = buildPlaywrightArgs(selection('subset', [CART]), ROOT).args.at(-1);
-  assert.equal(matches(arg, '/repo/demo/saucedemo/tests/cart/cart.spec.ts'), true);
-  for (const [name, decoy] of Object.entries(DECOYS)) assert.equal(matches(arg, decoy), false, name);
+  const selected = resolved(CART);
+  assert.equal(matches(arg, selected), true);
+  const decoys = {
+    tsx: selected.replace(/\.ts$/, '.tsx'),
+    miniCart: selected.replace('cart.spec.ts', 'mini-cart.spec.ts'),
+    nested: selected.replace(`${path.sep}demo${path.sep}`, `${path.sep}other${path.sep}demo${path.sep}`),
+    upperCase: selected.replace('cart', 'Cart'),
+    anyCharacter: selected.replace('cart.spec', 'cartXspec'),
+    otherRoot: `${path.parse(selected).root}x${selected.slice(path.parse(selected).root.length)}`,
+  };
+  for (const [name, decoy] of Object.entries(decoys)) assert.equal(matches(arg, decoy), false, name);
 });
 
 test("control: Playwright's filter reads a plain path as a loose pattern that over-matches", () => {

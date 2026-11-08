@@ -12,6 +12,10 @@ import { pathToFileURL } from 'node:url';
 
 const TMP_ROOT = fs.realpathSync(os.tmpdir());
 const PREFIX = 'prcheck-';
+// Git for Windows cannot use os.devNull (\\.\nul) as GIT_CONFIG_GLOBAL: init fails with
+// "unable to access '\\.\nul'". An empty file is a config that adds nothing on every OS.
+const EMPTY_GIT_CONFIG = path.join(TMP_ROOT, 'prcheck-empty-gitconfig');
+if (!fs.existsSync(EMPTY_GIT_CONFIG)) fs.writeFileSync(EMPTY_GIT_CONFIG, '');
 
 const insideTmp = (dir) => dir === TMP_ROOT || dir.startsWith(TMP_ROOT + path.sep);
 
@@ -27,7 +31,8 @@ export function gitEnv() {
     GIT_COMMON_DIR: undefined,
     GIT_OBJECT_DIRECTORY: undefined,
     GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
-    GIT_CONFIG_GLOBAL: os.devNull,
+    GIT_CONFIG_GLOBAL: EMPTY_GIT_CONFIG,
+    GIT_CONFIG_SYSTEM: EMPTY_GIT_CONFIG,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_AUTHOR_NAME: 'Test User',
     GIT_AUTHOR_EMAIL: 'test@example.com',
@@ -89,5 +94,11 @@ export function makeShallowClone(sourceDir) {
 
 export function cleanup(dir) {
   if (!insideTmp(dir) || dir === TMP_ROOT) throw new Error(`Refusing to delete outside the temp folder: ${dir}`);
-  fs.rmSync(dir, { recursive: true, force: true });
+  // Windows refuses to delete a directory that is still the cwd, and a file can stay locked briefly.
+  try {
+    if (process.cwd().toLowerCase().startsWith(dir.toLowerCase())) process.chdir(TMP_ROOT);
+  } catch {
+    // The cwd may already have been removed.
+  }
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }

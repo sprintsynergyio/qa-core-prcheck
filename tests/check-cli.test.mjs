@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cleanup, createTempRepo, gitEnv } from './helpers/git-repo.mjs';
 
 /**
@@ -389,7 +389,7 @@ test('check: provider set but key unset: stdout and files byte-identical to no l
   const plainRoot = llmRoot(t);
   const llmRootDir = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
-  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record };
+  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record };
   const plainCwd = newDir(t);
   const llmCwd = newDir(t);
   const plain = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', plainRoot.dir], { cwd: plainCwd, env });
@@ -423,7 +423,7 @@ test('check: an llm config that names apiKeyEnv exits 2 before any Playwright ca
   const root = llmRoot(t, { llm: { provider: 'openai', model: 'example-model', apiKeyEnv: 'GITHUB_TOKEN' } });
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY,
   };
   const r = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir], { cwd: newDir(t), env });
@@ -439,7 +439,7 @@ test('check: a dry run with the key set makes no fetch, and the inventory child 
   const root = llmRoot(t, { llm: { provider: 'openai', model: 'example-model' } });
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
   };
   const cwd = newDir(t);
@@ -457,7 +457,7 @@ test('check --skip-llm with a provider and a key makes no fetch and prints no of
   const root = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
   };
   const skipped = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir, '--skip-llm'], { cwd: newDir(t), env });
@@ -475,7 +475,7 @@ test('check: a dry run with a provider set and the key unset prints no off line,
   const plainRoot = llmRoot(t);
   const root = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
-  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: '' };
+  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: '' };
   const cwd = newDir(t);
   for (const extra of [[], ['--json']]) {
     const r = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir, '--dry-run', ...extra], { cwd, env });
@@ -491,7 +491,7 @@ test('check: a failed request is a skipped ranking: exit 0, the stderr line, and
   const root = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
   };
   const skipped = 'LLM ranking skipped: the provider could not be reached: ENETUNREACH (2 attempts). The deterministic order is used.';

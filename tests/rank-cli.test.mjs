@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cleanup } from './helpers/git-repo.mjs';
 
 /**
@@ -89,7 +89,7 @@ test('rank with provider none leaves the summary unchanged and makes no call', a
   writeCheckFiles(dir, diffPath);
   const record = path.join(dir, 'fetch.txt');
   const step = path.join(dir, 'step.md');
-  const env = cleanEnv({ NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record, GITHUB_STEP_SUMMARY: step });
+  const env = cleanEnv({ NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record, GITHUB_STEP_SUMMARY: step });
   const r = await runCli(['rank', '--diff-file', diffPath, '--root', dir, '--json'], { cwd: dir, env });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
@@ -130,7 +130,7 @@ test('rank with a key skips when the provider cannot be reached, and the key is 
   fs.writeFileSync(path.join(dir, 'qa-core-prcheck.config.json'), JSON.stringify({ llm: { provider: 'openai', model: 'example-model' } }));
   const record = path.join(dir, 'fetch.txt');
   const env = cleanEnv({
-    NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: FAKE_KEY,
+    NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: FAKE_KEY,
   });
   const r = await runCli(['rank', '--diff-file', diffPath, '--root', dir, '--json'], { cwd: dir, env });
   assert.equal(r.status, 0, r.stderr);

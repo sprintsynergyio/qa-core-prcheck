@@ -51,9 +51,19 @@ function notAReport(): never {
   throw new RunError(NOT_A_REPORT);
 }
 
-/** The first non-empty line, with color codes removed and the root taken out of paths. Not cut. */
+/**
+ * The first non-empty line, with color codes removed and the root taken out of paths. Not cut.
+ * Playwright and git may use either slash. A Windows root is removed from both forms, and a
+ * backslash that remains in the line becomes /, so the summary does not depend on the OS.
+ */
 function cleanFirstLine(text: string, root: string): string {
-  const clean = text.replace(ANSI, '').split(root + path.sep).join('');
+  let clean = text.replace(ANSI, '');
+  const forms = new Set([root, root.replaceAll('\\', '/'), root.replaceAll('/', '\\')]);
+  for (const form of forms) {
+    if (form === '') continue;
+    clean = clean.split(`${form}/`).join('').split(`${form}\\`).join('');
+  }
+  clean = clean.replaceAll('\\', '/');
   return clean.split('\n').map((line) => line.trim()).find((line) => line !== '') ?? '';
 }
 
