@@ -18,6 +18,7 @@
 
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { relativeRepoPath, resolveRepoPath, toForwardSlashes } from '../paths.js';
 import { cleanPlaywrightEnv, findPlaywrightCli, PlaywrightError } from '../playwright/cli.js';
 import { InventoryError, type Inventory, type InventorySpec, type InventoryTest } from './types.js';
 
@@ -47,7 +48,10 @@ function notAReport(): never {
 function reportedError(errors: unknown[], root: string): string {
   const first = errors[0];
   const message = isObject(first) && typeof first.message === 'string' ? first.message : String(first);
-  return `Playwright reported an error: ${firstLine(message.split(root + path.sep).join(''))}`;
+  const slashRoot = toForwardSlashes(root);
+  const line = firstLine(message).replaceAll('\\', '/');
+  const stripped = slashRoot === '' ? line : line.split(`${slashRoot}/`).join('').split(slashRoot).join('');
+  return `Playwright reported an error: ${stripped}`;
 }
 
 /** The titles that tests inside a describe block carry: an anonymous describe adds no title. */
@@ -69,10 +73,10 @@ function readSpec(spec: unknown, titles: string[], rootDir: string, root: string
   if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) notAReport();
   if (!Array.isArray(tests)) notAReport();
 
-  const absolute = path.resolve(rootDir, file);
-  const relative = path.relative(root, absolute).split(path.sep).join('/');
-  if (relative === '' || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
-    throw new InventoryError(`Spec file outside the root folder ${root}: ${absolute}`);
+  const absolute = resolveRepoPath(rootDir, file);
+  const relative = relativeRepoPath(root, absolute);
+  if (relative === null) {
+    throw new InventoryError(`Spec file outside the root folder ${toForwardSlashes(root)}: ${toForwardSlashes(absolute)}`);
   }
 
   const fullTitle = testTitle(titles, title);

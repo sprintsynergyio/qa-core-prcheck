@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { DiffResult } from '../diff/index.js';
 import { loadLlmConfig, selectTests, type Selection } from '../impact/index.js';
 import { DEFAULT_API_KEY_ENV, llmOffLine, rankWithLlm, type FetchLike, type LlmConfig, type Ranking, type SleepLike } from '../llm/index.js';
@@ -59,5 +58,7 @@ export async function runCheck(options: CheckOptions): Promise<CheckResult> {
  */
 export function checkErrorLine(message: string, root: string): string {
   const line = cleanErrorLine(message, root);
-  return root === path.parse(root).root ? line : line.split(root).join('<root>');
+  const slashRoot = root.replaceAll('\\', '/');
+  if (slashRoot === '/' || slashRoot === '') return line;
+  return line.split(slashRoot).join('<root>');
 }

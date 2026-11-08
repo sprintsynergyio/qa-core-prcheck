@@ -37,7 +37,8 @@ function newDir(t) {
 function reportCopy(t, name) {
   const text = fs.readFileSync(path.join(repoRoot, 'tests', 'fixtures', 'results', name), 'utf8');
   const file = path.join(newDir(t), name);
-  fs.writeFileSync(file, text.split('"/repo/').join(`"${repoRoot}/`).split('"/project/').join(`"${repoRoot}/`));
+  const slashRoot = repoRoot.replaceAll('\\', '/');
+  fs.writeFileSync(file, text.split('"/repo/').join(`"${slashRoot}/`).split('"/project/').join(`"${slashRoot}/`));
   return file;
 }
 
