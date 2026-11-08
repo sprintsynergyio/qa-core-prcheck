@@ -12,7 +12,9 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function npmRun(args, cwd) {
-  const ran = spawnSync(npm, args, { cwd, encoding: 'utf8', windowsHide: true });
+  // npm.cmd cannot be spawned directly on Windows. shell runs it.
+  const ran = spawnSync(npm, args, { cwd, encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' });
+  if (ran.error) throw new Error(`npm ${args.join(' ')} failed to start: ${ran.error.message}`);
   if (ran.status !== 0) {
     throw new Error(`npm ${args.join(' ')} exited ${ran.status}\n${ran.stderr || ''}`);
   }
