@@ -32,8 +32,9 @@ const NINE_KEYS = [
 ];
 const ZERO = { total: 0, passed: 0, failed: 0, flaky: 0, skipped: 0, timedOut: 0, interrupted: 0 };
 
-// The expected filters are written with repoRoot as is, so it must hold no regular expression character.
-assert.ok(!/[\\^$.*+?()[\]{}|]/.test(repoRoot), `repo path needs escaping: ${repoRoot}`);
+const escapeRegExp = (text) => text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+const configArg = path.resolve(repoRoot, 'demo/saucedemo');
+const fileArg = (file) => `/^${escapeRegExp(path.resolve(repoRoot, file))}$/`;
 
 function newDir(t) {
   const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'prcheck-'));
@@ -48,7 +49,8 @@ function newDir(t) {
 function reportCopy(t, name) {
   const text = fs.readFileSync(path.join(repoRoot, 'tests', 'fixtures', 'results', name), 'utf8');
   const file = path.join(newDir(t), name);
-  fs.writeFileSync(file, text.split('"/repo/').join(`"${repoRoot}/`).split('"/project/').join(`"${repoRoot}/`));
+  const slashRoot = repoRoot.replaceAll('\\', '/');
+  fs.writeFileSync(file, text.split('"/repo/').join(`"${slashRoot}/`).split('"/project/').join(`"${slashRoot}/`));
   return file;
 }
 
@@ -94,9 +96,9 @@ test('modify.diff: the fake gets exactly the subset arguments and a cleaned env 
 
   assert.equal(records.length, 1);
   assert.deepEqual(records[0].argv, [
-    'test', '--config', `${repoRoot}/demo/saucedemo`, ...OPTIONS,
-    `/^${repoRoot}/demo/saucedemo/tests/cart/cart\\.spec\\.ts$/`,
-    `/^${repoRoot}/demo/saucedemo/tests/checkout/checkout\\.spec\\.ts$/`,
+    'test', '--config', configArg, ...OPTIONS,
+    fileArg(CART_SPEC),
+    fileArg(CHECKOUT_SPEC),
   ]);
   // CI is passed through as the caller set it; the other eight keys are removed.
   assert.deepEqual(Object.keys(records[0].env), ['CI', 'PLAYWRIGHT_JSON_OUTPUT_FILE']);
@@ -120,7 +122,7 @@ test('mixed.diff gives mode full: every spec, and no file filter in the argument
   const { result, records } = await runFake(t, 'mixed.diff', { FAKE_PW_REPORT: reportCopy(t, 'demo-cart.json') });
   assert.equal(result.mode, 'full');
   assert.deepEqual(result.specs, ALL_SPECS);
-  assert.deepEqual(records.map((r) => r.argv), [['test', '--config', `${repoRoot}/demo/saucedemo`, ...OPTIONS]]);
+  assert.deepEqual(records.map((r) => r.argv), [['test', '--config', configArg, ...OPTIONS]]);
   assert.deepEqual(result.command, ['test', '--config', 'demo/saucedemo', ...OPTIONS]);
   assert.deepEqual([result.verdict, result.exitCode], ['passed', 0]);
 });

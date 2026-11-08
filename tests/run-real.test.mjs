@@ -211,6 +211,13 @@ const HOST_KEYS_REMOVED = [
 ];
 
 test('control: with GITHUB_ACTIONS kept, Playwright 1.60.0 runs git by itself, so the marker can catch it', REAL, async (t) => {
+  // Playwright looks up git.exe or git.cmd on Windows. A shebang file named git is not selected, so
+  // this control cannot see the call there. Linux and macOS still prove that keeping GITHUB_ACTIONS
+  // makes Playwright 1.60.0 run git, which is why the runner removes that variable.
+  if (process.platform === 'win32') {
+    t.skip('Playwright on Windows does not execute a shebang file named git');
+    return;
+  }
   const dir = newDir(t);
   writeProject(dir, writeTo(dir));
   const git = fakeGit(t);
