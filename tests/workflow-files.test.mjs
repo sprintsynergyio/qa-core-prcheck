@@ -366,6 +366,12 @@ test('ci.yml uses the same checkout and setup-node major as prcheck.yml', () => 
   assert.ok(!ci.includes('sprintsynergyhq'));
 });
 
+test('prcheck.yml runs on ubuntu-24.04 because Playwright 1.60.0 cannot install Chromium on ubuntu-latest', () => {
+  assert.ok(WORKFLOW.includes('\n    runs-on: ubuntu-24.04\n'));
+  assert.ok(!WORKFLOW.includes('\n    runs-on: ubuntu-latest\n'));
+  assert.ok(WORKFLOW.includes('Playwright 1.60.0 cannot install Chromium'));
+});
+
 test('prcheck.yml does not pass an LLM secret: the action runs from the pull request', () => {
   assert.ok(!WORKFLOW.includes('llm-api-key'));
   assert.ok(!WORKFLOW.includes('secrets.'));

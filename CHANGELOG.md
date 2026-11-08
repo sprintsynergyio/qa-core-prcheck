@@ -11,6 +11,7 @@ Safety and cost guards on top of 0.1.0. Not published. The npm version in `packa
 - Action inputs `llm` (default `false`) and `llm-api-key`. The key is passed only to the rank step, and only when `llm` is `true`. A skipped ranking prints a `::warning::` from `llm.status`. Output `llm-status`. A key with a line break, `%`, or more than 4096 characters is not sent. The request body is scrubbed of the key. At most two HTTP attempts, unchanged, and the config cannot raise them.
 - This repo's pull request workflow does not set `llm` and does not pass a secret, because it uses `uses: ./`.
 - `ci.yml` uses `actions/checkout@v7` and `actions/setup-node@v7`, the same majors as `prcheck.yml`.
+- The pull request workflow runs on `ubuntu-24.04`. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image behind `ubuntu-latest` (seen 2026-11-08). The unit-test workflow stays on `ubuntu-latest` because it does not install a browser.
 - Package links point at `github.com/sprintsynergyio/qa-core-prcheck`.
 - `docs/release-acceptance.md`: gap matrix and release checklist. PR 10 (eval fixtures beyond the existing unit fixtures) stays out of this tree.
 

@@ -1144,7 +1144,9 @@ concurrency:
 jobs:
   prcheck:
     name: Pick, run and summarize the Playwright tests
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26
+    # image that ubuntu-latest provides (seen on 2026-11-08).
+    runs-on: ubuntu-24.04
     steps:
       # Full history, so the merge base with origin/<base branch> is there. check only runs local git.
       - uses: actions/checkout@v7

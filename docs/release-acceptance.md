@@ -59,5 +59,6 @@ Product intent, taken from the README, the changelog, the tests, and the workflo
 - GitHub comment rendering (mentions, autolinks, the hidden marker in the job summary) is still a live check. Unit tests cover the Markdown the tool writes, not GitHub's renderer.
 - The action's "build dist when missing" step runs `npm ci` inside the action directory. That is the action's own package, which a pull request can change when `uses: ./`.
 - `ci.yml` and `prcheck.yml` pin actions by major tag (`@v7`), not by commit SHA.
+- The pull request workflow is pinned to `ubuntu-24.04` because Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image that `ubuntu-latest` currently provides. The unit-test workflow still uses `ubuntu-latest`.
 - No Windows or macOS CI job is configured. Path handling uses Node's `path` and git. It was not executed on those systems here.
 - There is no ESLint script. `npm run typecheck` is the static check.
