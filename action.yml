@@ -110,16 +110,20 @@ runs:
             exit 0
             ;;
         esac
-        # This step must not append the summary: rank writes the final text. A key inherited from
-        # the job must not reach Playwright, which runs pull request code.
+        # This step must not append the summary: rank writes the final text. A key or token inherited
+        # from the job must not reach Playwright, which runs pull request code. The comment step sets
+        # GITHUB_TOKEN itself.
         export GITHUB_STEP_SUMMARY=
         unset PRCHECK_LLM_API_KEY
+        unset GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN NODE_AUTH_TOKEN
         echo "base-ref=$base" >> "$GITHUB_OUTPUT"
         json="$RUNNER_TEMP/prcheck-check.json"
         code=0
         node "$GITHUB_ACTION_PATH/dist/cli.js" check --base "$base" --root "$ROOT" --summary-file "$SUMMARY_FILE" --timeout-minutes "$TIMEOUT_MINUTES" --skip-llm --json > "$json" || code=$?
         verdict=$(node -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).summary.verdict); } catch { process.stdout.write("error"); }' "$json")
-        if [ -f "$SUMMARY_FILE" ]; then
+        if [ -f "$SUMMARY_FILE" ] && grep -q '^::' "$SUMMARY_FILE"; then
+          echo "::error title=qa-core-prcheck::The summary contains a workflow command line and was not printed."
+        elif [ -f "$SUMMARY_FILE" ]; then
           cat "$SUMMARY_FILE"
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
@@ -139,6 +143,7 @@ runs:
         PRCHECK_LLM_API_KEY: ${{ inputs.llm-api-key }}
       run: |
         base="$BASE_REF"
+        unset GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN NODE_AUTH_TOKEN
         if [ "$LLM_ENABLED" != "true" ]; then
           unset PRCHECK_LLM_API_KEY
         elif [ -n "${PRCHECK_LLM_API_KEY:-}" ]; then
@@ -160,7 +165,9 @@ runs:
           reason=$(node -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const t = String((j.llm && j.llm.reason) || ""); process.stdout.write(t.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")); } catch { process.stdout.write(""); }' "$json")
           echo "::warning title=qa-core-prcheck::LLM ranking skipped: ${reason}. The deterministic order is used."
         fi
-        if [ -f "$SUMMARY_FILE" ]; then
+        if [ -f "$SUMMARY_FILE" ] && grep -q '^::' "$SUMMARY_FILE"; then
+          echo "::error title=qa-core-prcheck::The summary contains a workflow command line and was not printed."
+        elif [ -f "$SUMMARY_FILE" ]; then
           cat "$SUMMARY_FILE"
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"

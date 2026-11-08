@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_API_KEY_ENV, PROVIDER_NAMES, type LlmConfig, type ProviderName } from '../llm/types.js';
 import { ImpactError, type ImpactConfig } from './types.js';
@@ -14,6 +14,9 @@ export const MAX_TAG_CHARS = 64;
 export const MAX_GLOB_CHARS = 300;
 export const MAX_GLOB_LIST = 100;
 export const MAX_PLAYWRIGHT_DIR_CHARS = 200;
+// A chosen limit. Each * becomes a regex quantifier. A pull request config with dozens of them
+// can make matching take a very long time. Real globs in this repo use at most a few.
+export const MAX_GLOB_STARS = 8;
 
 const ALLOWED_KEYS = ['playwrightDir', 'areas', 'fullSuiteOn', 'ignore', 'llm'];
 const LLM_KEYS = ['provider', 'model'];
@@ -58,6 +61,8 @@ function readPlaywrightDir(value: unknown): string {
 function readGlobText(key: string, glob: string): void {
   if (glob.length > MAX_GLOB_CHARS) fail(`"${key}" glob is longer than ${MAX_GLOB_CHARS} characters`);
   if (CONTROL_CHARS.test(glob)) fail(`"${key}" glob must not contain control characters`);
+  const stars = glob.split('*').length - 1;
+  if (stars > MAX_GLOB_STARS) fail(`"${key}" glob has more than ${MAX_GLOB_STARS} * characters`);
 }
 
 function readAreas(value: unknown): ImpactConfig['areas'] {
@@ -97,7 +102,8 @@ function readConfigObject(root: string): Record<string, unknown> | null {
   const file = path.join(root, CONFIG_FILE);
   let text: string;
   try {
-    const stat = statSync(file);
+    const stat = lstatSync(file);
+    if (stat.isSymbolicLink()) fail('the file must be a regular file, not a symlink');
     if (!stat.isFile()) throw new ImpactError(`Cannot read ${CONFIG_FILE}`);
     if (stat.size > CONFIG_MAX_BYTES) fail(`the file is larger than ${CONFIG_MAX_BYTES} bytes`);
     text = readFileSync(file, 'utf8');
@@ -123,7 +129,7 @@ function readConfigObject(root: string): Record<string, unknown> | null {
 
 /**
  * Reads <root>/qa-core-prcheck.config.json, or returns the defaults when the file does not exist.
- * The "llm" key is accepted and not read here: only check reads it, with loadLlmConfig.
+ * The "llm" key is accepted and not read here: check and rank read it, with loadLlmConfig.
  */
 export function loadConfig(root: string): ImpactConfig {
   const json = readConfigObject(root);

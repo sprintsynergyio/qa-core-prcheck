@@ -363,7 +363,31 @@ test('ci.yml uses the same checkout and setup-node major as prcheck.yml', () => 
   const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
   assert.ok(ci.includes('actions/checkout@v7'));
   assert.ok(ci.includes('actions/setup-node@v7'));
+  assert.ok(ci.includes('os: [ubuntu-latest, windows-latest, macos-latest]'));
+  assert.ok(ci.includes('npm run eval'));
+  assert.ok(ci.includes('npm run pack:smoke'));
+  assert.ok(!ci.includes('playwright install'));
   assert.ok(!ci.includes('sprintsynergyhq'));
+});
+
+test('the action is documented as Linux-only and drops the job token before check and rank', () => {
+  assert.ok(WORKFLOW.includes('Linux only'));
+  const check = scriptOf('Run check');
+  const rank = scriptOf('Rank the summary');
+  const comment = scriptOf('Post or update the PR comment');
+  assert.ok(check.includes('unset GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN NODE_AUTH_TOKEN'));
+  assert.ok(rank.includes('unset GITHUB_TOKEN ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN NODE_AUTH_TOKEN'));
+  assert.ok(!comment.includes('unset GITHUB_TOKEN'));
+  assert.ok(check.includes("grep -q '^::'"));
+});
+
+test('check step drops GITHUB_TOKEN before Node', (t) => {
+  const fake = fakeAction(t);
+  const r = runStep(fake, 'Run check', { ...CHECK_ENV, FAKE_VERDICT: 'passed', GITHUB_TOKEN: 'ghs_fake_token_for_tests' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.records[0].token, false);
+  assert.ok(!r.stdout.includes('ghs_fake_token_for_tests'));
+  assert.ok(!r.stderr.includes('ghs_fake_token_for_tests'));
 });
 
 test('prcheck.yml runs on ubuntu-24.04 because Playwright 1.60.0 cannot install Chromium on ubuntu-latest', () => {

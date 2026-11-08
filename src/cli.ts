@@ -6,7 +6,7 @@
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { checkErrorLine, formatCheckJson, formatRankJson, rankSavedCheck, runCheck, type CheckResult } from './check/index.js';
+import { checkErrorLine, formatCheckJson, formatRankJson, rankSavedCheck, readCappedText, runCheck, type CheckResult } from './check/index.js';
 import { DiffError, formatJson, formatText, readDiffFile, readGitDiff, type DiffResult } from './diff/index.js';
 import {
   confirmCommentAuthor, createGitHubClient, findStickyCommentOnPullRequest, GitHubError, parseCommentAuthor, readPullRequestEvent,
@@ -15,7 +15,7 @@ import {
 import { formatSelectionJson, formatSelectionText, ImpactError, selectTests, type Selection } from './impact/index.js';
 import { InventoryError } from './inventory/index.js';
 import { llmMessages } from './llm/index.js';
-import { formatSummary, ReportError, shown, writeSummaryFiles, type WrittenFiles } from './report/index.js';
+import { formatSummary, MAX_SUMMARY_BYTES, ReportError, SUMMARY_MARKER, shown, writeSummaryFiles, type WrittenFiles } from './report/index.js';
 import { formatRunJson, formatRunText, RunError, runSelected, type RunResult } from './run/index.js';
 import { VERSION } from './version.js';
 
@@ -396,13 +396,13 @@ async function runRankCommand(args: string[]): Promise<void> {
     if (!(error instanceof DiffError)) throw error;
     // check may already have written an error summary. Keep it on the job summary when the ref is bad.
     try {
-      const markdown = await readFile(summaryFile, 'utf8');
+      const markdown = await readCappedText(summaryFile, MAX_SUMMARY_BYTES);
       const step = process.env.GITHUB_STEP_SUMMARY;
-      if (step !== undefined && step !== '') {
-      await appendFile(step, `${markdown}\n`);
+      if (step !== undefined && step !== '' && markdown.startsWith(SUMMARY_MARKER) && !/^::/m.test(markdown)) {
+        await appendFile(step, `${markdown}\n`);
       }
     } catch {
-      // The diff error is the one to report. A missing summary is its own error on the next run.
+      // The diff error is the one to report. A missing or unsafe summary is not appended.
     }
     return commandError('rank', error.message);
   }

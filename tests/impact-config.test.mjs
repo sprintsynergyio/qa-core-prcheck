@@ -179,6 +179,24 @@ for (const [label, content, message] of LLM_BAD) {
   });
 }
 
+test('limits: a glob with more than 8 stars is rejected', (t) => {
+  throwsImpactError(withConfig(t, { ignore: ['**/**/**/**/*'] }), '"ignore" glob has more than 8 * characters');
+  assert.equal(loadConfig(withConfig(t, { ignore: ['**/**/**/**'] })).ignore[0], '**/**/**/**');
+});
+
+test('a symlink config is rejected', (t) => {
+  const dir = newDir(t);
+  const target = path.join(dir, 'real.json');
+  fs.writeFileSync(target, '{"playwrightDir":"."}');
+  try {
+    fs.symlinkSync(target, path.join(dir, 'qa-core-prcheck.config.json'));
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') return;
+    throw error;
+  }
+  throwsImpactError(dir, 'the file must be a regular file, not a symlink');
+});
+
 test('limits: too many areas, tags, globs, a long tag, a control character and a huge file are rejected', (t) => {
   const areas = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`src/${i}.ts`, ['@cart']]));
   throwsImpactError(withConfig(t, { areas }), '"areas" has more than 100 globs');

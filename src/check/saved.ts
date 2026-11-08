@@ -1,15 +1,19 @@
 // Ranks a summary that check already wrote. It does not run Playwright and does not start a child
 // process. The action runs this after the check step, with the API key only in this process.
 
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile, lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DiffResult, DiffSource } from '../diff/index.js';
 import { loadLlmConfig } from '../impact/index.js';
 import type { Selection } from '../impact/index.js';
 import { llmOffLine, rankWithLlm, type FetchLike, type Ranking, type SleepLike } from '../llm/index.js';
-import { formatSummary, RESULTS_FILE, SELECTION_FILE, writeSummaryFiles } from '../report/index.js';
+import { formatSummary, MAX_SUMMARY_BYTES, RESULTS_FILE, SELECTION_FILE, SUMMARY_MARKER, writeSummaryFiles } from '../report/index.js';
 import { ReportError } from '../report/index.js';
 import type { RunResult, RunVerdict } from '../run/index.js';
+
+// Chosen limits. check writes a summary under MAX_SUMMARY_BYTES. A larger file, or a JSON file of
+// unbounded size, is refused so a replaced artifact cannot exhaust memory or the job summary.
+export const MAX_SAVED_JSON_BYTES = 2 * 1024 * 1024;
 
 const VERDICTS: readonly RunVerdict[] = ['passed', 'failed', 'nothing-to-run', 'not-run', 'error'];
 
@@ -51,11 +55,32 @@ function sameSource(a: DiffSource, b: DiffSource): boolean {
   return a.type === 'file' && b.type === 'file' && a.path === b.path;
 }
 
+function stringList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
 function asSelection(value: unknown): Selection | null {
   if (!isObject(value) || value.schemaVersion !== 1) return null;
   if (value.mode !== 'none' && value.mode !== 'subset' && value.mode !== 'full') return null;
   if (!Array.isArray(value.selected)) return null;
-  if (!isObject(value.source) || (value.source.type !== 'git' && value.source.type !== 'file')) return null;
+  if (!value.selected.every((spec) => isObject(spec) && typeof spec.file === 'string' && typeof spec.testCount === 'number' && stringList(spec.reasons))) {
+    return null;
+  }
+  if ('suggestions' in value && value.suggestions !== undefined) {
+    if (!Array.isArray(value.suggestions)) return null;
+    const suggestionsOk = value.suggestions.every((item) => isObject(item)
+      && typeof item.file === 'string' && typeof item.reason === 'string' && typeof item.idea === 'string');
+    if (!suggestionsOk) return null;
+  }
+  if (value.mode === 'full' && !stringList(value.fullSuiteReasons)) return null;
+  const source = value.source;
+  if (!isObject(source)) return null;
+  if (source.type === 'git') {
+    const shas = ['baseSha', 'headSha', 'mergeBaseSha'];
+    if (!shas.every((key) => typeof source[key] === 'string' && source[key] !== '')) return null;
+  } else if (source.type !== 'file' || typeof source.path !== 'string') {
+    return null;
+  }
   return value as unknown as Selection;
 }
 
@@ -63,16 +88,40 @@ function asResult(value: unknown): RunResult | null {
   if (!isObject(value) || value.schemaVersion !== 1) return null;
   if (typeof value.verdict !== 'string' || !VERDICTS.includes(value.verdict as RunVerdict)) return null;
   if (!Array.isArray(value.tests)) return null;
+  const testsOk = value.tests.every((test) => isObject(test) && typeof test.file === 'string' && typeof test.title === 'string' && typeof test.status === 'string');
+  if (!testsOk) return null;
   return value as unknown as RunResult;
+}
+
+/** Reads a regular file up to maxBytes. A symlink is refused so the path cannot point outside the workspace. */
+export async function readCappedText(file: string, maxBytes: number): Promise<string> {
+  const name = path.basename(file);
+  let stat;
+  try {
+    stat = await lstat(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new ReportError(`Cannot read ${name}: ${typeof code === 'string' ? code : 'unknown error'}`);
+  }
+  if (stat.isSymbolicLink()) throw new ReportError(`${name} must be a regular file, not a symlink`);
+  if (!stat.isFile()) throw new ReportError(`Cannot read ${name}`);
+  if (stat.size > maxBytes) throw new ReportError(`${name} is larger than ${maxBytes} bytes`);
+  return readFile(file, 'utf8');
+}
+
+function assertSummaryText(markdown: string): void {
+  if (!markdown.startsWith(SUMMARY_MARKER)) throw new ReportError('The summary does not start with the qa-core-prcheck marker');
+  // A line that starts with :: is a GitHub Actions workflow command. cat of the summary would run it.
+  if (/^::/m.test(markdown)) throw new ReportError('The summary contains a workflow command line');
 }
 
 async function readOptionalJson(file: string): Promise<{ missing: boolean; value: unknown }> {
   let text: string;
   try {
-    text = await readFile(file, 'utf8');
+    text = await readCappedText(file, MAX_SAVED_JSON_BYTES);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { missing: true, value: null };
-    throw new ReportError(`Cannot read ${path.basename(file)}`);
+    if (error instanceof ReportError && error.message.endsWith(': ENOENT')) return { missing: true, value: null };
+    throw error;
   }
   try {
     return { missing: false, value: JSON.parse(text) };
@@ -102,11 +151,13 @@ export async function rankSavedCheck(options: SavedRankOptions): Promise<SavedRa
   const { root, diff, summaryFile, version, env, fetch, sleep } = options;
   let markdown: string;
   try {
-    markdown = await readFile(summaryFile, 'utf8');
+    markdown = await readCappedText(summaryFile, MAX_SUMMARY_BYTES);
   } catch (error) {
+    if (error instanceof ReportError) throw error;
     const code = (error as NodeJS.ErrnoException).code;
     throw new ReportError(`Cannot read ${path.basename(summaryFile)}: ${typeof code === 'string' ? code : 'unknown error'}`);
   }
+  assertSummaryText(markdown);
 
   let published = false;
   try {

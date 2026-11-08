@@ -1,64 +1,48 @@
 # Release acceptance
 
-This note is the gap matrix and the checklist for the tree after 0.1.0. It is not a claim that the package is published or that a pull request is safe to merge without review.
+Checklist for version 0.2.0 in this tree. The npm registry still has 0.1.0 until the owner publishes. This file is not a claim that a pull request is safe to merge.
 
-Published baseline: `@sprintsynergy/qa-core-prcheck` 0.1.0. The `package.json` version stays `0.1.0` until the owner bumps it, tags, and publishes. This tree does not tag or publish.
+Product rules that stay in force:
 
-Product intent, taken from the README, the changelog, the tests, and the workflows:
+- Selection is rule-first. A file that no rule maps runs the full suite.
+- The result is advisory. A failed test does not fail the action unless `fail-on-test-failure` is true. A pass is not a safe-merge guarantee.
+- LLM ranking is off unless a workflow sets `llm: true` and passes a key. It cannot add, remove, or run a spec, and it cannot change the verdict or the exit code.
+- This repo's pull request workflow does not pass an LLM secret. It uses `uses: ./`.
+- The GitHub Action is Linux-only. The CLI is what Windows and macOS CI run.
 
-- A rule-first picker. Changed files map to Playwright spec files, with a written reason. A file that no rule maps runs the full suite.
-- The result is advisory. A failed test is reported. It does not fail the GitHub Action job unless `fail-on-test-failure` is `true`. It is not a guarantee that the pull request is safe to merge.
-- Optional LLM ranking is off by default. It may reorder and annotate. It cannot add, remove, or run a spec, and it cannot change the verdict or the exit code.
-- Fork pull requests and Dependabot do not get a write token, and this repo's workflow does not pass an LLM secret.
+## Comment and job summary evidence
 
-## Gap matrix
+Checked against pull request 1, comment 6726882681, from the successful run on `ubuntu-24.04` (actions run 42521610240), by reading the API and the uploaded artifact. This was not a browser session.
 
-| Capability | Before (0.1.0) | After this tree | Evidence |
-| --- | --- | --- | --- |
-| Diff, classify, select, suggest | Implemented | Unchanged rules | Existing unit tests |
-| Run picked specs with `--forbid-only` | Implemented | Unchanged | Existing unit tests |
-| Markdown summary, sticky comment, fork skip, read-only token skip | Implemented | Unchanged | Existing unit tests |
-| LLM ranking in `check`, off by default, answer checked strictly | Implemented | Still the local `check` path. `--skip-llm` skips it | `tests/check-cli.test.mjs`, `tests/llm-rank.test.mjs` |
-| Config size, count, and character limits | Named as later work | Implemented. The config cannot raise them | `tests/impact-config.test.mjs` |
-| Kill timeout other than a fixed 30 minutes | Fixed 30 minutes | `--timeout-minutes` and the action input, 1 to 30 only | `tests/run-cli.test.mjs`, `tests/check-cli.test.mjs`, `tests/workflow-files.test.mjs` |
-| Ranking after Playwright, key not in that process | Not in the action | `rank` command. The check step unsets the key. `llm` defaults to `false` | `tests/rank-cli.test.mjs`, `tests/workflow-files.test.mjs` |
-| Action reads `llm.status` and warns on skip | Not done when `check --json` ran | Rank step prints the warning from the JSON | `tests/workflow-files.test.mjs` |
-| Key shape and request redaction | Answer and errors scrubbed | Key must be one printable line of at most 4096 characters. The request body is scrubbed before send. `%` and line breaks are not masked into the log | `tests/llm-rank.test.mjs`, `tests/workflow-files.test.mjs` |
-| Call cap | Two attempts, input and output caps | Same caps. No config key can raise them | `tests/llm-rank.test.mjs` |
-| This repo's workflow passes an LLM secret | It did not | It still does not. `uses: ./` would let a pull request read a secret | `tests/workflow-files.test.mjs` |
-| Org links | `sprintsynergyhq` in `package.json` | `sprintsynergyio` | `package.json` |
-| CI action majors | `ci.yml` on v4, `prcheck.yml` on v7 | Both on v7 | `tests/workflow-files.test.mjs` |
-| Eval suite beyond unit fixtures (roadmap PR 10) | Not a separate product | Deferred. The fixtures under `tests/fixtures/` remain the regression suite | This file |
-| Live GitHub rendering checks | Open in the README | Still open. Not run from this environment | README, Live Checks |
+- The artifact `prcheck-summary.md` starts with the marker `<!-- qa-core-prcheck:summary -->`.
+- GitHub's rendered comment HTML (`Accept: application/vnd.github.html+json`) does not contain that marker and does not contain `<!--`. The body starts at `<h2>PR Check: Passed (Full Suite Run)</h2>`. The counts table rendered as a table. The footer text is present.
+- That comment's tests are the demo titles. They do not contain `@`, `#1`, `GH-1`, `$`, or a URL. So this comment does not prove those escapes in GitHub's renderer.
+- `npm run eval` checks the bytes the tool would write for `@sardar-usman`, `#1`, `GH-1`, `sprintsynergyio/qa-core-prcheck#1`, `$x$`, and a URL whose hash must stay raw. That is the local contract, not a screenshot.
+- The job summary page was not available from the API or the artifact. The rank step is what appends it. Whether that page hides the marker has not been seen.
+
+What the owner still has to look at:
+
+1. Open the job summary for a PR Check run and confirm the marker is hidden and the heading is the first visible line.
+2. On a throwaway pull request, use a failing test title that contains `@sardar-usman`, `#1`, `GH-1`, `sprintsynergyio/qa-core-prcheck#1`, `$x$`, and `https://example.com/docs#1-intro`. Confirm the comment and the job summary do not notify anyone, do not link `#1` or `GH-1`, do not render math, and the URL address is exactly that URL.
 
 ## Release checklist
 
-- [x] Rules still decide selection, verdict, and exit code. LLM output cannot add a spec.
-- [x] LLM stays off unless a workflow sets `llm: true` and supplies `PRCHECK_LLM_API_KEY`. This repo's workflow does neither.
-- [x] Fork workflow path stays `pull_request` only, `pull-requests: write` only for the comment, checkout with `persist-credentials: false`, and `comment: false` for forks and Dependabot.
-- [x] Config from the pull request cannot choose the key's env var, raise the timeout past 30 minutes, or raise the LLM attempt cap.
-- [x] `npm test` (build, typecheck is separate), `npm run typecheck`, and a packed CLI smoke test were run for this change. Record the results in the pull request.
-- [ ] Owner reviews the diff, including `action.yml` and the decision not to pass a secret from `prcheck.yml`.
-- [ ] Owner bumps the version, updates the changelog date, tags, and publishes only after that review. This tree does not do those steps.
-- [ ] Owner runs the live checks still listed in the README on a throwaway pull request before calling the comment rendering done.
-- [ ] Owner pins a trusted tag before setting `llm: true` on a repository that holds a real API key.
+- [x] Rules still decide selection, verdict, and exit code.
+- [x] LLM stays off in this repo's workflow.
+- [x] Fork path stays `pull_request` only, with `comment: false` for forks and Dependabot, checkout `persist-credentials: false`.
+- [x] Config cannot name the key env var, raise the timeout past 30 minutes, or raise the LLM attempt cap.
+- [x] Check and rank unset the job token and runtime token before Node. The comment step still gets its token.
+- [x] `npm run eval` is in CI and prints pass or fail per case, not a model score.
+- [x] CLI CI is scheduled on Linux, Windows, and macOS. Record the run URLs on the pull request after they finish.
+- [ ] Owner reads the job summary and, if they want the escape cases live, the throwaway pull request above.
+- [ ] Owner confirms a fork pull request still gets no comment.
+- [ ] Owner pins a trusted tag before setting `llm: true` with a real key.
+- [ ] Owner merges, tags `v0.2.0`, and publishes. This tree does not do those steps.
 
-## Deferred on purpose
+## Still out of scope
 
-- PR 10 eval fixtures and a separate docs site. The current tests are the regression suite. A new eval harness would be a new product surface.
-- Making a failed test fail the job by default. The README defines v1 as advisory.
-- Per-test selection, tsconfig path aliases, and runtime data-file tracking. The README lists these as select limits.
-- HTML report. `run` replaces reporters with JSON.
-- A configurable timeout above 30 minutes, or a timeout key in the pull request config.
-- Passing `secrets.PRCHECK_LLM_API_KEY` from this repo's `pull_request` workflow while it uses `uses: ./`.
-
-## Remaining risks
-
-- A same-repository pull request can change `action.yml` and the CLI, because the workflow uses `uses: ./`. The GITHUB_TOKEN on `pull_request` from a fork is read-only. A same-repository pull request is not a fork. Do not put an LLM secret in that workflow until the action is pinned to a tag the owner trusts.
-- `rank` and a local `check` without `--skip-llm` send paths, titles, reasons, and test statuses to the provider when ranking is on. They do not send file bodies or diff hunks. A hostile title can still waste the call. The answer is rejected unless it is an exact reorder.
-- GitHub comment rendering (mentions, autolinks, the hidden marker in the job summary) is still a live check. Unit tests cover the Markdown the tool writes, not GitHub's renderer.
-- The action's "build dist when missing" step runs `npm ci` inside the action directory. That is the action's own package, which a pull request can change when `uses: ./`.
-- `ci.yml` and `prcheck.yml` pin actions by major tag (`@v7`), not by commit SHA.
-- The pull request workflow is pinned to `ubuntu-24.04` because Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image that `ubuntu-latest` currently provides. The unit-test workflow still uses `ubuntu-latest`.
-- No Windows or macOS CI job is configured. Path handling uses Node's `path` and git. It was not executed on those systems here.
-- There is no ESLint script. `npm run typecheck` is the static check.
+- A quality score for the picker or for an LLM.
+- Making a failed test fail the job by default.
+- Per-test selection, tsconfig path aliases, and runtime data files.
+- Running the GitHub Action on Windows or macOS.
+- Installing Chromium on `ubuntu-latest` while Playwright stays at 1.60.0.

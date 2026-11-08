@@ -4,7 +4,7 @@ A CI agent for GitHub Actions that reads a pull request diff, picks the Playwrig
 
 ## Status
 
-Version 0.1.0 is the published npm package `@sprintsynergy/qa-core-prcheck`. Changes after that release are under Unreleased in [CHANGELOG.md](CHANGELOG.md) and are not published. The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
+Version 0.2.0 is the version in this tree. It is not published yet. The npm registry still has 0.1.0 until the owner publishes. See [CHANGELOG.md](CHANGELOG.md). The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
 
 ## Requirements
 
@@ -13,6 +13,7 @@ Version 0.1.0 is the published npm package `@sprintsynergy/qa-core-prcheck`. Cha
 - git, needed for the `diff`, `select`, `run` and `check` commands with `--base`
 - Chromium for Playwright, only needed to run the demo suite, directly or through `run` or `check`
 - A GitHub token with `pull-requests: write`, only for the `comment` command; GitHub Actions provides it
+- The `qa-core-prcheck` command is the supported surface on Linux, Windows, and macOS. The GitHub Action is Linux-only: its steps are bash, and this repo runs it on `ubuntu-24.04` because Playwright 1.60.0 cannot install Chromium on the current `ubuntu-latest` image. Windows and macOS CI runs the CLI, the rule eval, and a packed-package smoke test. It does not install a browser.
 
 ## Install
 
@@ -301,7 +302,7 @@ These problems exit 2 with a message that names the file and the key:
 
 `select`, `run` and `diff` accept the `llm` key and ignore what is in it. `check` and `rank` read and check it, so a bad `llm` object makes `check` exit 2 before any test runs; its messages are listed in LLM Ranking (Optional).
 
-`playwrightDir` is normalized: `./demo/x/` becomes `demo/x`. Areas are sorted by glob, and tags and lists are sorted with duplicates removed. The file is refused over 65536 bytes. `playwrightDir` is at most 200 characters and has no control characters. `areas` has at most 100 globs, each with at most 20 tags; a tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs, each at most 300 characters and with no control characters. A glob or tag that fails these limits exits 2 with a message that names the key. The pull request config cannot raise the limits, name an API key env var, or set the Playwright kill timeout.
+`playwrightDir` is normalized: `./demo/x/` becomes `demo/x`. Areas are sorted by glob, and tags and lists are sorted with duplicates removed. The file is refused over 65536 bytes. `playwrightDir` is at most 200 characters and has no control characters. `areas` has at most 100 globs, each with at most 20 tags; a tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs, each at most 300 characters, with no control characters, and with at most 8 `*` characters so a glob cannot make matching take unbounded time. The config file must be a regular file, not a symlink. A glob or tag that fails these limits exits 2 with a message that names the key. The pull request config cannot raise the limits, name an API key env var, or set the Playwright kill timeout.
 
 The Playwright config file is the first of `playwright.config.ts`, `.js`, `.mts`, `.mjs`, `.cts` and `.cjs` found in `playwrightDir`. That is the order Playwright itself uses.
 
@@ -1127,6 +1128,7 @@ Only a 403 on the write is skipped. A 403 on reading the comments or on `GET /us
 # Runs qa-core-prcheck on every pull request of this repo, with the action in this repo.
 # The pull_request event only, so a fork's code never runs with a write token.
 # Event values never go into with: or run:; the only expression in with: is a boolean.
+# Linux only. Windows and macOS coverage of the CLI is the CI workflow.
 name: PR Check
 
 on:

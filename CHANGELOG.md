@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-09)
 
-Safety and cost guards on top of 0.1.0. Not published. The npm version in `package.json` stays `0.1.0` until the owner cuts a release.
+Safety and cost guards, a rule eval, and Windows and macOS CLI coverage, on top of 0.1.0. This version is in the repository and is not published. The owner tags and publishes.
 
 - Config limits: `qa-core-prcheck.config.json` is refused over 65536 bytes. `playwrightDir` is at most 200 characters. `areas` has at most 100 globs and 20 tags each. A tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs of at most 300 characters. Control characters are refused. The pull request config still cannot name the API key env var or the kill timeout.
 - `--timeout-minutes` on `run` and `check`, and the action input `timeout-minutes`: a whole number from 1 to 30, default 30. Outside that range is exit 2 and no test starts.
@@ -11,9 +11,12 @@ Safety and cost guards on top of 0.1.0. Not published. The npm version in `packa
 - Action inputs `llm` (default `false`) and `llm-api-key`. The key is passed only to the rank step, and only when `llm` is `true`. A skipped ranking prints a `::warning::` from `llm.status`. Output `llm-status`. A key with a line break, `%`, or more than 4096 characters is not sent. The request body is scrubbed of the key. At most two HTTP attempts, unchanged, and the config cannot raise them.
 - This repo's pull request workflow does not set `llm` and does not pass a secret, because it uses `uses: ./`.
 - `ci.yml` uses `actions/checkout@v7` and `actions/setup-node@v7`, the same majors as `prcheck.yml`.
-- The pull request workflow runs on `ubuntu-24.04`. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image behind `ubuntu-latest` (seen 2026-11-08). The unit-test workflow stays on `ubuntu-latest` because it does not install a browser.
+- The pull request workflow runs on `ubuntu-24.04` and is Linux-only. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image behind `ubuntu-latest` (seen 2026-11-08).
+- CI runs typecheck, unit tests, `npm run eval`, and `npm run pack:smoke` on `ubuntu-latest`, `windows-latest`, and `macos-latest`. Those jobs do not install a browser and do not call SauceDemo.
+- Review fixes: the check and rank steps unset `GITHUB_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, and `NODE_AUTH_TOKEN` before Node starts. The comment step still receives its token. A config symlink is refused. A glob with more than 8 `*` characters is refused. `rank` refuses a summary over 60000 bytes, a summary that does not start with the marker, a summary line that is a workflow command, a symlink, and a selection or result JSON that is not the shape `check` writes. JSON reads are capped at 2 MiB.
+- `npm run eval` checks saved diffs against the demo tree: a mapped page, docs-only and empty diffs, an unimported page, a full-suite trigger, a rename against the current checkout, paths with spaces, a rejected timeout, and the mention and autolink escapes. The result is pass or fail per case. It is not a model score.
 - Package links point at `github.com/sprintsynergyio/qa-core-prcheck`.
-- `docs/release-acceptance.md`: gap matrix and release checklist. PR 10 (eval fixtures beyond the existing unit fixtures) stays out of this tree.
+- `docs/release-acceptance.md`: gap matrix, comment-rendering evidence, and the release checklist.
 
 ## 0.1.0 (2026-11-03)
 

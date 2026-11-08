@@ -156,6 +156,32 @@ test('rank of a summary with no selection JSON appends it and does not fail', as
   assert.deepEqual(fs.readdirSync(dir).sort(), ['prcheck-summary.md', 'step.md']);
 });
 
+test('rank rejects a summary that is a workflow command, oversized, or not a real selection', async (t) => {
+  const command = newDir(t);
+  fs.writeFileSync(path.join(command, 'prcheck-summary.md'), '<!-- qa-core-prcheck:summary -->\n::error::injected\n');
+  const injected = await runCli(['rank', '--diff-file', diffPath, '--root', command], { cwd: command });
+  assert.equal(injected.status, 2);
+  assert.match(injected.stderr, /workflow command line/);
+  assert.equal(injected.stdout, '');
+
+  const hugeDir = newDir(t);
+  fs.writeFileSync(path.join(hugeDir, 'prcheck-summary.md'), `<!-- qa-core-prcheck:summary -->\n${'x'.repeat(70_000)}\n`);
+  const huge = await runCli(['rank', '--diff-file', diffPath, '--root', hugeDir], { cwd: hugeDir });
+  assert.equal(huge.status, 2);
+  assert.match(huge.stderr, /larger than 60000 bytes/);
+
+  const bad = newDir(t);
+  fs.writeFileSync(path.join(bad, 'prcheck-summary.md'), SUMMARY);
+  fs.writeFileSync(path.join(bad, 'prcheck-selection.json'), `${JSON.stringify({
+    schemaVersion: 1, mode: 'subset', selected: [{}], source: { type: 'file', path: diffPath },
+  })}\n`);
+  fs.writeFileSync(path.join(bad, 'prcheck-results.json'), `${JSON.stringify(passed.result)}\n`);
+  const rejected = await runCli(['rank', '--diff-file', diffPath, '--root', bad], { cwd: bad });
+  assert.equal(rejected.status, 2);
+  assert.match(rejected.stderr, /not a selection written by check/);
+  assert.equal(fs.readFileSync(path.join(bad, 'prcheck-summary.md'), 'utf8'), SUMMARY);
+});
+
 test('rank rejects --timeout-minutes and --dry-run', async (t) => {
   const dir = newDir(t);
   const timeout = await runCli(['rank', '--timeout-minutes', '5', '--diff-file', diffPath], { cwd: dir });

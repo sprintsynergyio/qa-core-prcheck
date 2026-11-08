@@ -1,6 +1,8 @@
 # Runs qa-core-prcheck on every pull request of this repo, with the action in this repo.
 # The pull_request event only, so a fork's code never runs with a write token.
 # Event values never go into with: or run:; the only expression in with: is a boolean.
+# Linux only. The action's steps are bash, and Playwright 1.60.0 installs Chromium here.
+# Windows and macOS coverage of the CLI is the CI workflow, not this job.
 name: PR Check
 
 on:
