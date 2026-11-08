@@ -9,4 +9,4 @@ export { validateAnswer } from './validate.js';
 export { anthropic, ANTHROPIC_VERSION } from './anthropic.js';
 export { openai } from './openai.js';
 export { gemini } from './gemini.js';
-export { llmMessages, llmOffLine, rankWithLlm, skippedLine, type RankInput } from './rank.js';
+export { LLM_KEY_MAX_CHARS, llmKeyProblem, llmMessages, llmOffLine, rankWithLlm, skippedLine, type RankInput } from './rank.js';

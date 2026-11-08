@@ -99,8 +99,8 @@ test('no run: script in either file holds ${{', () => {
   const scripts = [...runScripts(WORKFLOW), ...runScripts(ACTION)];
   assert.deepEqual(scripts.map((s) => s.script.trim().split('\n')[0]), [
     'npm ci', 'npm run build', 'npx playwright install --with-deps chromium',
-    'if [ ! -f "$GITHUB_ACTION_PATH/dist/cli.js" ]; then', 'base="$BASE_REF"', 'code=0',
-    'if [ "$CHECK_EXIT" = "2" ] || [ "$COMMENT_EXIT" = "2" ]; then',
+    'if [ ! -f "$GITHUB_ACTION_PATH/dist/cli.js" ]; then', 'base="$BASE_REF"', 'base="$BASE_REF"', 'code=0',
+    'if [ "$CHECK_EXIT" = "2" ] || [ "$RANK_EXIT" = "2" ] || [ "$COMMENT_EXIT" = "2" ]; then',
   ]);
   for (const { name, script } of scripts) assert.ok(!script.includes('${{'), `${name}: ${script}`);
 });
@@ -116,18 +116,20 @@ test('the only expressions in prcheck.yml are the PR number in the concurrency g
 
 test('action.yml reads no event value, and its expressions are only inputs, step outputs, the token default and the workspace', () => {
   assert.ok(!ACTION.includes('github.event'));
-  const allowed = /^\$\{\{ (inputs\.[a-z-]+|steps\.(check|comment)\.outputs\.(exit-code|verdict)|github\.token|github\.workspace) \}\}$/;
+  const allowed = /^\$\{\{ (inputs\.[a-z-]+|steps\.(check|comment|rank)\.outputs\.(exit-code|verdict|base-ref|llm-status)|github\.token|github\.workspace) \}\}$/;
   for (const [expression] of ACTION.matchAll(/\$\{\{.*?\}\}/g)) assert.match(expression, allowed);
 });
 
 test('action.yml is a composite action with every input and output, and shell: bash on every run step', () => {
   assert.ok(ACTION.includes('\nruns:\n  using: composite\n'));
-  assert.deepEqual(childKeys(ACTION, 'inputs:'), ['base-ref', 'root', 'summary-file', 'comment', 'github-token', 'comment-author', 'fail-on-test-failure']);
-  assert.deepEqual(childKeys(ACTION, 'outputs:'), ['exit-code', 'verdict']);
+  assert.deepEqual(childKeys(ACTION, 'inputs:'), ['base-ref', 'root', 'summary-file', 'timeout-minutes', 'comment', 'github-token', 'comment-author', 'fail-on-test-failure', 'llm', 'llm-api-key']);
+  assert.deepEqual(childKeys(ACTION, 'outputs:'), ['exit-code', 'verdict', 'llm-status']);
   assert.ok(ACTION.includes("\n  comment:\n    description: true to post or update the sticky PR comment. The comment command skips fork pull requests itself.\n    required: false\n    default: 'true'\n"));
   assert.ok(ACTION.includes("\n  fail-on-test-failure:\n    description: true to fail when a picked test fails. Off by default, because v1 is advisory.\n    required: false\n    default: 'false'\n"));
-  assert.equal([...ACTION.matchAll(/^\s+run: \|$/gm)].length, 4);
-  assert.equal([...ACTION.matchAll(/^\s+shell: bash$/gm)].length, 4);
+  assert.equal([...ACTION.matchAll(/^\s+run: \|$/gm)].length, 5);
+  assert.equal([...ACTION.matchAll(/^\s+shell: bash$/gm)].length, 5);
+  assert.ok(ACTION.includes("\n  llm:\n    description: true to allow one optional LLM ranking call after Playwright exits. Off by default. Also set llm-api-key. The pull request config chooses the provider only when this is true.\n    required: false\n    default: 'false'\n"));
+  assert.ok(ACTION.includes('\n      if: steps.check.outputs.base-ref != \'\'\n'));
 });
 
 test('action.yml declares comment-author with default github-actions[bot] and describes the token rule', () => {
@@ -165,12 +167,23 @@ function fakeAction(t) {
   fs.mkdirSync(path.join(dir, 'work'));
   fs.writeFileSync(path.join(dir, 'action', 'dist', 'cli.js'), [
     "const fs = require('node:fs');",
-    "fs.appendFileSync(process.env.FAKE_RECORD, JSON.stringify({ argv: process.argv.slice(2), token: process.env.GITHUB_TOKEN === 'ghs_fake_token_for_tests' }) + '\\n');",
+    "const record = {",
+    "  argv: process.argv.slice(2),",
+    "  token: process.env.GITHUB_TOKEN === 'ghs_fake_token_for_tests',",
+    "  llmKey: Object.prototype.hasOwnProperty.call(process.env, 'PRCHECK_LLM_API_KEY') ? process.env.PRCHECK_LLM_API_KEY : null,",
+    "  stepSummary: Object.prototype.hasOwnProperty.call(process.env, 'GITHUB_STEP_SUMMARY') ? process.env.GITHUB_STEP_SUMMARY : null,",
+    '};',
+    "fs.appendFileSync(process.env.FAKE_RECORD, JSON.stringify(record) + '\\n');",
     "if (process.argv[2] === 'check') {",
     "  const file = process.argv[process.argv.indexOf('--summary-file') + 1];",
     "  fs.writeFileSync(file, '<!-- qa-core-prcheck:summary -->\\n## PR Check: From The Fake\\n');",
     "  if (process.env.FAKE_VERDICT) process.stdout.write(JSON.stringify({ summary: { verdict: process.env.FAKE_VERDICT } }));",
     "  process.exitCode = Number(process.env.FAKE_EXIT ?? '0');",
+    "} else if (process.argv[2] === 'rank') {",
+    "  const status = process.env.FAKE_LLM_STATUS || '';",
+    "  const reason = process.env.FAKE_LLM_REASON || '';",
+    "  process.stdout.write(JSON.stringify({ llm: status ? { status, reason } : null }));",
+    "  process.exitCode = Number(process.env.FAKE_RANK_EXIT ?? '0');",
     '} else {',
     "  process.exitCode = Number(process.env.FAKE_COMMENT_EXIT ?? '0');",
     '}',
@@ -200,17 +213,18 @@ function runStep(fake, name, env) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, output: fs.readFileSync(fake.output, 'utf8'), records };
 }
 
-const CHECK_ENV = { BASE_REF: '', ROOT: '.', SUMMARY_FILE: 'prcheck-summary.md', GITHUB_BASE_REF: 'main' };
-const CHECK_ARGS = (base) => ['check', '--base', base, '--root', '.', '--summary-file', 'prcheck-summary.md', '--json'];
+const CHECK_ENV = { BASE_REF: '', ROOT: '.', SUMMARY_FILE: 'prcheck-summary.md', GITHUB_BASE_REF: 'main', TIMEOUT_MINUTES: '30' };
+const CHECK_ARGS = (base) => ['check', '--base', base, '--root', '.', '--summary-file', 'prcheck-summary.md', '--timeout-minutes', '30', '--skip-llm', '--json'];
+const CHECK_RECORD = (base) => ({ argv: CHECK_ARGS(base), token: false, llmKey: null, stepSummary: '' });
 
 for (const [code, verdict] of [['0', 'passed'], ['1', 'failed'], ['2', 'error']]) {
   test(`check step: check exit ${code} is recorded with verdict ${verdict}, the summary is printed, and the step passes`, (t) => {
     const fake = fakeAction(t);
     const r = runStep(fake, 'Run check', { ...CHECK_ENV, FAKE_EXIT: code, FAKE_VERDICT: verdict });
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.output, `exit-code=${code}\nverdict=${verdict}\n`);
+    assert.equal(r.output, `base-ref=origin/main\nexit-code=${code}\nverdict=${verdict}\n`);
     assert.equal(r.stdout, '<!-- qa-core-prcheck:summary -->\n## PR Check: From The Fake\n');
-    assert.deepEqual(r.records, [{ argv: CHECK_ARGS('origin/main'), token: false }]);
+    assert.deepEqual(r.records, [CHECK_RECORD('origin/main')]);
   });
 }
 
@@ -218,7 +232,7 @@ test('check step: no JSON (an error before the run) gives verdict error', (t) =>
   const fake = fakeAction(t);
   const r = runStep(fake, 'Run check', { ...CHECK_ENV, FAKE_EXIT: '2' });
   assert.equal(r.status, 0);
-  assert.equal(r.output, 'exit-code=2\nverdict=error\n');
+  assert.equal(r.output, 'base-ref=origin/main\nexit-code=2\nverdict=error\n');
 });
 
 test('check step: a base branch name with shell characters stays one quoted argument', (t) => {
@@ -226,14 +240,14 @@ test('check step: a base branch name with shell characters stays one quoted argu
   const branch = 'main"; echo injected; "$(echo also-injected)';
   const r = runStep(fake, 'Run check', { ...CHECK_ENV, GITHUB_BASE_REF: branch, FAKE_VERDICT: 'passed' });
   assert.equal(r.status, 0);
-  assert.deepEqual(r.records, [{ argv: CHECK_ARGS(`origin/${branch}`), token: false }]);
+  assert.deepEqual(r.records, [CHECK_RECORD(`origin/${branch}`)]);
   assert.ok(!r.stdout.includes('injected') && !r.stderr.includes('injected'));
 });
 
 test('check step: a base-ref input wins over GITHUB_BASE_REF', (t) => {
   const fake = fakeAction(t);
   const r = runStep(fake, 'Run check', { ...CHECK_ENV, BASE_REF: 'origin/release', FAKE_VERDICT: 'passed' });
-  assert.deepEqual(r.records, [{ argv: CHECK_ARGS('origin/release'), token: false }]);
+  assert.deepEqual(r.records, [CHECK_RECORD('origin/release')]);
 });
 
 test('check step: no base ref at all records exit 2 and an error annotation without running check', (t) => {
@@ -253,34 +267,107 @@ for (const code of ['0', '2']) {
     });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.output, `exit-code=${code}\n`);
-    assert.deepEqual(r.records, [{ argv: ['comment', '--summary-file', 'prcheck-summary.md'], token: true }]);
+    assert.deepEqual(r.records, [{ argv: ['comment', '--summary-file', 'prcheck-summary.md'], token: true, llmKey: null, stepSummary: null }]);
     assert.ok(!r.stdout.includes('ghs_fake_token_for_tests'));
   });
 }
 
-const TOOL_ERROR = (check, comment) =>
-  `::error title=qa-core-prcheck::A tool error stopped the check or the comment (check exit ${check}, comment exit ${comment}). See the log above.\n`;
+const TOOL_ERROR = (check, rank, comment) =>
+  `::error title=qa-core-prcheck::A tool error stopped the check, the rank step or the comment (check exit ${check}, rank exit ${rank}, comment exit ${comment}). See the log above.\n`;
 const WARNING = '::warning title=qa-core-prcheck::A picked test failed. The check is advisory, so this step passes.\n';
 
-// CHECK_EXIT, COMMENT_EXIT ('' when the comment step was skipped), FAIL_ON_TEST_FAILURE, step status, annotation.
+// CHECK_EXIT, RANK_EXIT ('' when rank was skipped), COMMENT_EXIT ('' when comment was skipped),
+// FAIL_ON_TEST_FAILURE, step status, annotation.
 const MAPPING = [
-  ['0', '0', 'false', 0, ''],
-  ['0', '', 'false', 0, ''],
-  ['1', '0', 'false', 0, WARNING],
-  ['1', '', 'false', 0, WARNING],
-  ['1', '0', 'true', 1, '::error title=qa-core-prcheck::A picked test failed.\n'],
-  ['2', '0', 'false', 1, TOOL_ERROR('2', '0')],
-  ['2', '', 'false', 1, TOOL_ERROR('2', 'skipped')],
-  ['0', '2', 'false', 1, TOOL_ERROR('0', '2')],
-  ['1', '2', 'false', 1, TOOL_ERROR('1', '2')],
-  ['', '', 'false', 1, '::error title=qa-core-prcheck::check gave no known exit code (none).\n'],
+  ['0', '', '0', 'false', 0, ''],
+  ['0', '', '', 'false', 0, ''],
+  ['1', '', '0', 'false', 0, WARNING],
+  ['1', '', '', 'false', 0, WARNING],
+  ['1', '', '0', 'true', 1, '::error title=qa-core-prcheck::A picked test failed.\n'],
+  ['2', '', '0', 'false', 1, TOOL_ERROR('2', 'skipped', '0')],
+  ['2', '', '', 'false', 1, TOOL_ERROR('2', 'skipped', 'skipped')],
+  ['0', '', '2', 'false', 1, TOOL_ERROR('0', 'skipped', '2')],
+  ['0', '2', '0', 'false', 1, TOOL_ERROR('0', '2', '0')],
+  ['1', '2', '0', 'false', 1, TOOL_ERROR('1', '2', '0')],
+  ['', '', '', 'false', 1, '::error title=qa-core-prcheck::check gave no known exit code (none).\n'],
 ];
 
-for (const [check, comment, failOn, status, annotation] of MAPPING) {
-  test(`mapping: check ${check || 'none'}, comment ${comment || 'skipped'}, fail-on-test-failure ${failOn}: step exits ${status}`, (t) => {
+for (const [check, rank, comment, failOn, status, annotation] of MAPPING) {
+  test(`mapping: check ${check || 'none'}, rank ${rank || 'skipped'}, comment ${comment || 'skipped'}, fail-on-test-failure ${failOn}: step exits ${status}`, (t) => {
     const fake = fakeAction(t);
-    const r = runStep(fake, 'Map the exit codes', { CHECK_EXIT: check, COMMENT_EXIT: comment, FAIL_ON_TEST_FAILURE: failOn });
+    const r = runStep(fake, 'Map the exit codes', { CHECK_EXIT: check, RANK_EXIT: rank, COMMENT_EXIT: comment, FAIL_ON_TEST_FAILURE: failOn });
     assert.equal(r.status, status);
     assert.equal(r.stdout, annotation);
   });
 }
+
+test('check step drops an inherited API key and does not append the job summary', (t) => {
+  const fake = fakeAction(t);
+  const r = runStep(fake, 'Run check', { ...CHECK_ENV, FAKE_VERDICT: 'passed', PRCHECK_LLM_API_KEY: 'prcheck_fake_llm_key_for_tests', GITHUB_STEP_SUMMARY: '/tmp/should-not-be-used' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.records, [CHECK_RECORD('origin/main')]);
+  assert.ok(r.output.includes('base-ref=origin/main\n'));
+  assert.ok(!r.stdout.includes('prcheck_fake_llm_key_for_tests'));
+});
+
+test('check step rejects a timeout outside 1 to 30 without running check', (t) => {
+  const fake = fakeAction(t);
+  const r = runStep(fake, 'Run check', { ...CHECK_ENV, TIMEOUT_MINUTES: '90', FAKE_VERDICT: 'passed' });
+  assert.equal(r.status, 0);
+  assert.equal(r.output, 'exit-code=2\nverdict=error\n');
+  assert.equal(r.stdout, '::error title=qa-core-prcheck::timeout-minutes must be a whole number from 1 to 30.\n');
+  assert.deepEqual(r.records, []);
+});
+
+test('rank step with llm not true drops the key and makes no warning', (t) => {
+  const fake = fakeAction(t);
+  const r = runStep(fake, 'Rank the summary', {
+    BASE_REF: 'origin/main', ROOT: '.', SUMMARY_FILE: 'prcheck-summary.md', LLM_ENABLED: 'false',
+    PRCHECK_LLM_API_KEY: 'prcheck_fake_llm_key_for_tests',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.records, [{ argv: ['rank', '--base', 'origin/main', '--root', '.', '--summary-file', 'prcheck-summary.md', '--json'], token: false, llmKey: null, stepSummary: null }]);
+  assert.equal(r.output, 'exit-code=0\nllm-status=none\n');
+  assert.ok(!r.stdout.includes('prcheck_fake_llm_key_for_tests'));
+  assert.ok(!r.stdout.includes('::add-mask::'));
+});
+
+test('rank step with llm true masks a single-token key and warns on a skipped ranking', (t) => {
+  const fake = fakeAction(t);
+  const key = 'prcheck_fake_llm_key_for_tests';
+  const r = runStep(fake, 'Rank the summary', {
+    BASE_REF: 'origin/main', ROOT: '.', SUMMARY_FILE: 'prcheck-summary.md', LLM_ENABLED: 'true',
+    PRCHECK_LLM_API_KEY: key, FAKE_LLM_STATUS: 'skipped', FAKE_LLM_REASON: 'the provider returned status 404',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.records[0].llmKey, key);
+  assert.equal(r.records[0].argv[0], 'rank');
+  assert.ok(r.stdout.includes(`::add-mask::${key}\n`));
+  assert.equal(r.stdout.includes('::warning title=qa-core-prcheck::LLM ranking skipped: the provider returned status 404. The deterministic order is used.\n'), true);
+  assert.equal(r.output, 'exit-code=0\nllm-status=skipped\n');
+});
+
+test('rank step refuses a key that contains a percent or a line break and does not mask it', (t) => {
+  const fake = fakeAction(t);
+  const r = runStep(fake, 'Rank the summary', {
+    BASE_REF: 'origin/main', ROOT: '.', SUMMARY_FILE: 'prcheck-summary.md', LLM_ENABLED: 'true',
+    PRCHECK_LLM_API_KEY: 'bad%key',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.records[0].llmKey, null);
+  assert.ok(r.stdout.startsWith('::warning title=qa-core-prcheck::LLM ranking is off: the API key is not a single token, so it was not used.\n'));
+  assert.ok(!r.stdout.includes('bad%key'));
+});
+
+test('ci.yml uses the same checkout and setup-node major as prcheck.yml', () => {
+  const ci = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.ok(ci.includes('actions/checkout@v7'));
+  assert.ok(ci.includes('actions/setup-node@v7'));
+  assert.ok(!ci.includes('sprintsynergyhq'));
+});
+
+test('prcheck.yml does not pass an LLM secret: the action runs from the pull request', () => {
+  assert.ok(!WORKFLOW.includes('llm-api-key'));
+  assert.ok(!WORKFLOW.includes('secrets.'));
+  assert.ok(!WORKFLOW.includes('sprintsynergyhq'));
+});

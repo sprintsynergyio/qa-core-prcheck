@@ -4,9 +4,9 @@
 //   1  a picked test failed (run and check)
 //   2  usage or tool error
 
-import { readFile } from 'node:fs/promises';
+import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { checkErrorLine, formatCheckJson, runCheck, type CheckResult } from './check/index.js';
+import { checkErrorLine, formatCheckJson, formatRankJson, rankSavedCheck, runCheck, type CheckResult } from './check/index.js';
 import { DiffError, formatJson, formatText, readDiffFile, readGitDiff, type DiffResult } from './diff/index.js';
 import {
   confirmCommentAuthor, createGitHubClient, findStickyCommentOnPullRequest, GitHubError, parseCommentAuthor, readPullRequestEvent,
@@ -26,6 +26,7 @@ Commands:
   select          Pick the Playwright specs a change can affect (does not run them)
   run             Run the picked Playwright specs and report the results
   check           Pick, run and summarize: writes the Markdown summary for the PR
+  rank            Apply optional LLM ranking to a summary that check already wrote
   comment         Post or update the sticky PR comment from a summary file
 
 Options:
@@ -71,19 +72,20 @@ qa-core-prcheck run --diff-file <path> [--root <dir>] [--json] [--dry-run]
 Picks the Playwright specs a change can affect, runs them and reports the results.
 
 Options:
-  --base <ref>        Compare against the merge base of this ref and the head
-  --head <ref>        The head ref (default: HEAD)
-  --diff-file <path>  Read a saved unified git diff instead of running git
-  --root <dir>        The repository root (default: the current folder)
-  --json              Print JSON instead of text
-  --dry-run           Print the Playwright command without running it
-  -h, --help          Print this help
+  --base <ref>           Compare against the merge base of this ref and the head
+  --head <ref>           The head ref (default: HEAD)
+  --diff-file <path>     Read a saved unified git diff instead of running git
+  --root <dir>           The repository root (default: the current folder)
+  --timeout-minutes <n>  Kill timeout for Playwright, a whole number from 1 to 30 (default: 30)
+  --json                 Print JSON instead of text
+  --dry-run              Print the Playwright command without running it
+  -h, --help             Print this help
 
 Exit codes: 0 all picked tests passed or nothing to run, 1 a picked test failed, 2 usage or tool error.
 `;
 
-const CHECK_USAGE = `qa-core-prcheck check --base <ref> [--head <ref>] [--root <dir>] [--summary-file <path>] [--json] [--dry-run]
-qa-core-prcheck check --diff-file <path> [--root <dir>] [--summary-file <path>] [--json] [--dry-run]
+const CHECK_USAGE = `qa-core-prcheck check --base <ref> [--head <ref>] [--root <dir>] [--summary-file <path>] [--json] [--dry-run] [--skip-llm]
+qa-core-prcheck check --diff-file <path> [--root <dir>] [--summary-file <path>] [--json] [--dry-run] [--skip-llm]
 
 Picks the Playwright specs a change can affect, runs them and writes one Markdown summary.
 
@@ -93,13 +95,36 @@ Options:
   --diff-file <path>     Read a saved unified git diff instead of running git
   --root <dir>           The repository root (default: the current folder)
   --summary-file <path>  Where to write the summary (default: prcheck-summary.md)
+  --timeout-minutes <n>  Kill timeout for Playwright, a whole number from 1 to 30 (default: 30)
   --json                 Print JSON instead of the Markdown summary
   --dry-run              Build the command and summary without running tests or writing files
+  --skip-llm             Do not rank. The action uses this so the API key stays out of Playwright
   -h, --help             Print this help
 
 Also appends the summary to $GITHUB_STEP_SUMMARY when it is set.
-Reads "llm" from qa-core-prcheck.config.json for optional advisory LLM ranking (off by default; key from the env var it names).
+Reads "llm" from qa-core-prcheck.config.json for optional advisory LLM ranking (off by default).
+The API key is read only from the env var PRCHECK_LLM_API_KEY. --skip-llm makes no ranking call.
 Exit codes: 0 all picked tests passed or nothing to run, 1 a picked test failed, 2 usage or tool error.
+`;
+
+const RANK_USAGE = `qa-core-prcheck rank --base <ref> [--head <ref>] [--root <dir>] [--summary-file <path>] [--json]
+qa-core-prcheck rank --diff-file <path> [--root <dir>] [--summary-file <path>] [--json]
+
+Applies optional LLM ranking to the summary that check already wrote. It does not run Playwright.
+
+Options:
+  --base <ref>           Compare against the merge base of this ref and the head
+  --head <ref>           The head ref (default: HEAD)
+  --diff-file <path>     Read a saved unified git diff instead of running git
+  --root <dir>           The repository root (default: the current folder)
+  --summary-file <path>  The summary written by check (default: prcheck-summary.md)
+  --json                 Print JSON instead of the summary
+  -h, --help             Print this help
+
+Pass the same --base or --diff-file that check used. Reads "llm" from qa-core-prcheck.config.json.
+The API key is read only from the env var PRCHECK_LLM_API_KEY. Off by default.
+Appends the summary to $GITHUB_STEP_SUMMARY when it is set.
+Exit codes: 0 ranked, skipped or off, 2 usage or tool error. This command never exits 1.
 `;
 
 const COMMENT_USAGE = `qa-core-prcheck comment --summary-file <path> [--dry-run]
@@ -136,22 +161,31 @@ type DiffSourceRequest =
   | { source: 'git'; base: string; head: string | undefined }
   | { source: 'file'; diffFile: string };
 
-interface ParsedArgs { values: Map<string, string>; json: boolean; dryRun: boolean }
+interface ParsedArgs { values: Map<string, string>; json: boolean; dryRun: boolean; skipLlm: boolean }
 
 const DIFF_OPTIONS = new Set(['--base', '--head', '--diff-file']);
 const SELECT_OPTIONS = new Set([...DIFF_OPTIONS, '--root']);
-const CHECK_OPTIONS = new Set([...SELECT_OPTIONS, '--summary-file']);
+const RUN_OPTIONS = new Set([...SELECT_OPTIONS, '--timeout-minutes']);
+const RANK_OPTIONS = new Set([...SELECT_OPTIONS, '--summary-file']);
+const CHECK_OPTIONS = new Set([...RUN_OPTIONS, '--summary-file']);
 const COMMENT_OPTIONS = new Set(['--summary-file']);
+
+// The kill timeout the CLI and the action allow. A whole number of minutes, 1 to 30.
+const MIN_TIMEOUT_MINUTES = 1;
+const MAX_TIMEOUT_MINUTES = 30;
 
 /**
  * Returns the values, or the message for the first problem found. Values follow their option; no = form.
  * --dry-run is a flag only where allowDryRun is set, and --json only where allowJson is set; elsewhere
  * each is an unknown argument.
  */
-function parseArgs(args: string[], valueOptions: Set<string>, allowDryRun = false, allowJson = true): ParsedArgs | string {
+function parseArgs(
+  args: string[], valueOptions: Set<string>, allowDryRun = false, allowJson = true, allowSkipLlm = false,
+): ParsedArgs | string {
   const values = new Map<string, string>();
   let json = false;
   let dryRun = false;
+  let skipLlm = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -161,6 +195,9 @@ function parseArgs(args: string[], valueOptions: Set<string>, allowDryRun = fals
     } else if (allowDryRun && arg === '--dry-run') {
       if (dryRun) return 'Duplicate argument: --dry-run';
       dryRun = true;
+    } else if (allowSkipLlm && arg === '--skip-llm') {
+      if (skipLlm) return 'Duplicate argument: --skip-llm';
+      skipLlm = true;
     } else if (valueOptions.has(arg)) {
       if (values.has(arg)) return `Duplicate argument: ${arg}`;
       const value = args[i + 1];
@@ -171,7 +208,16 @@ function parseArgs(args: string[], valueOptions: Set<string>, allowDryRun = fals
       return `Unknown argument: ${arg}`;
     }
   }
-  return { values, json, dryRun };
+  return { values, json, dryRun, skipLlm };
+}
+
+/** The kill timeout in ms, or a usage message. Missing means 30 minutes. The config file cannot set this. */
+function timeoutMsOf(raw: string | undefined): number | string {
+  if (raw === undefined) return MAX_TIMEOUT_MINUTES * 60 * 1000;
+  if (!/^(?:[1-9]|[12]\d|30)$/.test(raw)) {
+    return `--timeout-minutes must be a whole number of minutes from ${MIN_TIMEOUT_MINUTES} to ${MAX_TIMEOUT_MINUTES}`;
+  }
+  return Number(raw) * 60 * 1000;
 }
 
 /** Exactly one of --base and --diff-file, and --head only with --base. */
@@ -246,17 +292,19 @@ async function runSelect(args: string[]): Promise<void> {
 async function runRun(args: string[]): Promise<void> {
   if (handleHelp('run', RUN_USAGE, args)) return;
 
-  const parsed = parseArgs(args, SELECT_OPTIONS, true);
+  const parsed = parseArgs(args, RUN_OPTIONS, true);
   if (typeof parsed === 'string') return commandError('run', parsed);
   const request = diffSourceOf(parsed.values);
   if (typeof request === 'string') return commandError('run', request);
+  const timeoutMs = timeoutMsOf(parsed.values.get('--timeout-minutes'));
+  if (typeof timeoutMs === 'string') return commandError('run', timeoutMs);
   const root = path.resolve(parsed.values.get('--root') ?? process.cwd());
 
   // Problems before Playwright starts are typed errors and leave stdout empty, as for select.
   let result: RunResult;
   try {
     const diff = await readDiff(request, root);
-    result = await runSelected({ root, diff, dryRun: parsed.dryRun });
+    result = await runSelected({ root, diff, dryRun: parsed.dryRun, timeoutMs });
   } catch (error) {
     if (error instanceof DiffError || error instanceof InventoryError || error instanceof ImpactError || error instanceof RunError) {
       return commandError('run', error.message);
@@ -273,10 +321,12 @@ async function runRun(args: string[]): Promise<void> {
 async function runCheckCommand(args: string[]): Promise<void> {
   if (handleHelp('check', CHECK_USAGE, args)) return;
 
-  const parsed = parseArgs(args, CHECK_OPTIONS, true);
+  const parsed = parseArgs(args, CHECK_OPTIONS, true, true, true);
   if (typeof parsed === 'string') return commandError('check', parsed);
   const request = diffSourceOf(parsed.values);
   if (typeof request === 'string') return commandError('check', request);
+  const timeoutMs = timeoutMsOf(parsed.values.get('--timeout-minutes'));
+  if (typeof timeoutMs === 'string') return commandError('check', timeoutMs);
   const root = path.resolve(parsed.values.get('--root') ?? process.cwd());
   // Read from the current folder, as --diff-file is.
   const summaryFile = path.resolve(parsed.values.get('--summary-file') ?? DEFAULT_SUMMARY_FILE);
@@ -284,7 +334,9 @@ async function runCheckCommand(args: string[]): Promise<void> {
   let checked: CheckResult;
   try {
     const diff = await readDiff(request, root);
-    checked = await runCheck({ root, diff, dryRun: parsed.dryRun, version: VERSION, env: process.env });
+    checked = await runCheck({
+      root, diff, dryRun: parsed.dryRun, skipLlm: parsed.skipLlm, timeoutMs, version: VERSION, env: process.env,
+    });
   } catch (error) {
     if (!(error instanceof DiffError || error instanceof InventoryError || error instanceof ImpactError || error instanceof RunError)) {
       throw error;
@@ -325,6 +377,48 @@ async function runCheckCommand(args: string[]): Promise<void> {
   for (const line of messages.stderr) process.stderr.write(`${line}\n`);
   for (const line of messages.stdout) process.stdout.write(`${line}\n`);
   process.exitCode = exitCode;
+}
+
+async function runRankCommand(args: string[]): Promise<void> {
+  if (handleHelp('rank', RANK_USAGE, args)) return;
+
+  const parsed = parseArgs(args, RANK_OPTIONS);
+  if (typeof parsed === 'string') return commandError('rank', parsed);
+  const request = diffSourceOf(parsed.values);
+  if (typeof request === 'string') return commandError('rank', request);
+  const root = path.resolve(parsed.values.get('--root') ?? process.cwd());
+  const summaryFile = path.resolve(parsed.values.get('--summary-file') ?? DEFAULT_SUMMARY_FILE);
+
+  let diff;
+  try {
+    diff = await readDiff(request, root);
+  } catch (error) {
+    if (!(error instanceof DiffError)) throw error;
+    // check may already have written an error summary. Keep it on the job summary when the ref is bad.
+    try {
+      const markdown = await readFile(summaryFile, 'utf8');
+      const step = process.env.GITHUB_STEP_SUMMARY;
+      if (step !== undefined && step !== '') {
+      await appendFile(step, `${markdown}\n`);
+      }
+    } catch {
+      // The diff error is the one to report. A missing summary is its own error on the next run.
+    }
+    return commandError('rank', error.message);
+  }
+
+  try {
+    const ranked = await rankSavedCheck({ root, diff, summaryFile, version: VERSION, env: process.env });
+    process.stdout.write(parsed.json ? formatRankJson(ranked) : ranked.markdown);
+    const messages = llmMessages(ranked.ranking, ranked.offLine, { json: parsed.json, githubActions: process.env.GITHUB_ACTIONS === 'true' });
+    for (const line of messages.stderr) process.stderr.write(`${line}\n`);
+    for (const line of messages.stdout) process.stdout.write(`${line}\n`);
+  } catch (error) {
+    if (error instanceof DiffError || error instanceof ImpactError || error instanceof ReportError) {
+      return commandError('rank', error.message);
+    }
+    throw error;
+  }
 }
 
 function errorCode(error: unknown): string {
@@ -436,6 +530,7 @@ async function main(args: string[]): Promise<void> {
   if (first === 'select') return runSelect(args.slice(1));
   if (first === 'run') return runRun(args.slice(1));
   if (first === 'check') return runCheckCommand(args.slice(1));
+  if (first === 'rank') return runRankCommand(args.slice(1));
   if (first === 'comment') return runCommentCommand(args.slice(1));
 
   if (first === undefined || first === '--help' || first === '-h') {

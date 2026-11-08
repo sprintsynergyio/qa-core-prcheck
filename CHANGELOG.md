@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Safety and cost guards on top of 0.1.0. Not published. The npm version in `package.json` stays `0.1.0` until the owner cuts a release.
+
+- Config limits: `qa-core-prcheck.config.json` is refused over 65536 bytes. `playwrightDir` is at most 200 characters. `areas` has at most 100 globs and 20 tags each. A tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs of at most 300 characters. Control characters are refused. The pull request config still cannot name the API key env var or the kill timeout.
+- `--timeout-minutes` on `run` and `check`, and the action input `timeout-minutes`: a whole number from 1 to 30, default 30. Outside that range is exit 2 and no test starts.
+- `rank` command: applies the optional LLM ranking to the summary `check` already wrote. It does not run Playwright. It rewrites the summary only when a ranking is applied or skipped, and it appends the summary to `$GITHUB_STEP_SUMMARY`.
+- `check --skip-llm`: pick and run, and do not rank. The action sets this and unsets `PRCHECK_LLM_API_KEY` before Node starts, so the key is not in the process that runs pull request tests.
+- Action inputs `llm` (default `false`) and `llm-api-key`. The key is passed only to the rank step, and only when `llm` is `true`. A skipped ranking prints a `::warning::` from `llm.status`. Output `llm-status`. A key with a line break, `%`, or more than 4096 characters is not sent. The request body is scrubbed of the key. At most two HTTP attempts, unchanged, and the config cannot raise them.
+- This repo's pull request workflow does not set `llm` and does not pass a secret, because it uses `uses: ./`.
+- `ci.yml` uses `actions/checkout@v7` and `actions/setup-node@v7`, the same majors as `prcheck.yml`.
+- Package links point at `github.com/sprintsynergyio/qa-core-prcheck`.
+- `docs/release-acceptance.md`: gap matrix and release checklist. PR 10 (eval fixtures beyond the existing unit fixtures) stays out of this tree.
+
 ## 0.1.0 (2026-11-03)
 
 First public release, as the npm package `@sprintsynergy/qa-core-prcheck`. It holds everything merged to main up to and including PR 8.

@@ -4,7 +4,7 @@ A CI agent for GitHub Actions that reads a pull request diff, picks the Playwrig
 
 ## Status
 
-Version 0.1.0, the first public release, as the npm package `@sprintsynergy/qa-core-prcheck`. The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code; see LLM Ranking (Optional). See [CHANGELOG.md](CHANGELOG.md) for everything in this release.
+Version 0.1.0 is the published npm package `@sprintsynergy/qa-core-prcheck`. Changes after that release are under Unreleased in [CHANGELOG.md](CHANGELOG.md) and are not published. The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
 
 ## Requirements
 
@@ -299,9 +299,9 @@ These problems exit 2 with a message that names the file and the key:
 - `areas` is not an object, has an empty glob, or maps a glob to anything other than a non-empty list of tags that start with `@`
 - `fullSuiteOn` or `ignore` is not a list of non-empty strings
 
-`select`, `run` and `diff` accept the `llm` key and ignore what is in it. Only `check` reads and checks it, so a bad `llm` object makes `check` exit 2 before any test runs; its messages are listed in LLM Ranking (Optional).
+`select`, `run` and `diff` accept the `llm` key and ignore what is in it. `check` and `rank` read and check it, so a bad `llm` object makes `check` exit 2 before any test runs; its messages are listed in LLM Ranking (Optional).
 
-`playwrightDir` is normalized: `./demo/x/` becomes `demo/x`. Areas are sorted by glob, and tags and lists are sorted with duplicates removed. Fuller validation with limits arrives in PR 9.
+`playwrightDir` is normalized: `./demo/x/` becomes `demo/x`. Areas are sorted by glob, and tags and lists are sorted with duplicates removed. The file is refused over 65536 bytes. `playwrightDir` is at most 200 characters and has no control characters. `areas` has at most 100 globs, each with at most 20 tags; a tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs, each at most 300 characters and with no control characters. A glob or tag that fails these limits exits 2 with a message that names the key. The pull request config cannot raise the limits, name an API key env var, or set the Playwright kill timeout.
 
 The Playwright config file is the first of `playwright.config.ts`, `.js`, `.mts`, `.mjs`, `.cts` and `.cjs` found in `playwrightDir`. That is the order Playwright itself uses.
 
@@ -430,7 +430,7 @@ Real output of `node dist/cli.js select --diff-file tests/fixtures/diffs/modify.
 - The inventory and the import graph are read from the files under `--root`, so that checkout should be the head of the diff. If another commit is checked out, the result reflects that checkout.
 - Areas come after rule 8, so an area cannot pick specs for a support script that no spec imports.
 - Playwright leaves a spec file with no tests out of its list, so such a file is not in the inventory. A Playwright folder with no tests at all exits 2 with `No tests found`.
-- The config file keys are only the four above.
+- The config file keys are `playwrightDir`, `areas`, `fullSuiteOn`, `ignore` and `llm`. `select` accepts `llm` and does not read it. Counts and lengths are capped; see Config File.
 - The command prints JSON to stdout and does not write an artifact file yet.
 
 ## Run Command
@@ -452,6 +452,7 @@ node dist/cli.js run --diff-file changes.diff --dry-run   # print the Playwright
 | `--head <ref>` | The head ref (default: `HEAD`) |
 | `--diff-file <path>` | Read a saved unified git diff instead of running git |
 | `--root <dir>` | The repository root (default: the current folder) |
+| `--timeout-minutes <n>` | Kill timeout for the Playwright run, a whole number from 1 to 30 (default: 30). The config file cannot set it |
 | `--json` | Print JSON instead of text |
 | `--dry-run` | Print the Playwright command without running it |
 
@@ -624,7 +625,7 @@ Durations are Playwright's measurements and change between runs. Everything else
 - The JSON report is read from a temp file and not kept.
 - Playwright's own console output is not shown.
 - `error` is one line. For an `expect()` failure that is the matcher line; the expected and received values are on later lines and are not included. Error lines are cut at 200 characters.
-- The kill timeout is a fixed constant of 30 minutes. It becomes configurable in PR 9.
+- The kill timeout defaults to 30 minutes. `run` and `check` take `--timeout-minutes` from 1 to 30. The action input `timeout-minutes` uses the same range. A value outside it is a usage error, exit 2, and no test starts. The config file has no timeout key, because that file comes from the pull request under check.
 - Git capture is turned off by removing `GITHUB_ACTIONS`, `GITLAB_CI`, `JENKINS_URL` and `BUILD_URL`, the only variables Playwright 1.60.0 checks before it runs git (`lib/runner/index.js:653-685`); with `GITHUB_ACTIONS` and a pull request event it would also run `git fetch`. `CI` alone starts no git, and a `--list` run never does. A Playwright config that sets `captureGitInfo` itself still makes Playwright run git.
 - `CI` is passed through, so a config that reads `process.env.CI` behaves as it does in CI. In the demo config that means `forbidOnly` is on in CI (the flag already forces it) and 2 workers in CI instead of Playwright's default. The worker count changes only how long the run takes: the result is sorted, so only durations differ. With `CI` set, Playwright's own progress output is `dot` instead of `line`; it is not read.
 
@@ -648,10 +649,12 @@ node dist/cli.js check --diff-file changes.diff --dry-run  # the summary of what
 | `--diff-file <path>` | Read a saved unified git diff instead of running git |
 | `--root <dir>` | The repository root (default: the current folder) |
 | `--summary-file <path>` | Where to write the summary (default: `prcheck-summary.md`) |
+| `--timeout-minutes <n>` | Kill timeout for the Playwright run, a whole number from 1 to 30 (default: 30) |
 | `--json` | Print JSON instead of the Markdown summary |
 | `--dry-run` | Build the command and summary without running tests or writing files |
+| `--skip-llm` | Do not rank. The action sets this so the API key is not in the process that runs Playwright |
 
-`check --help` also says that it reads `llm` from the config file for the optional LLM ranking; see LLM Ranking (Optional). The option rules are the same as for `run`. `--summary-file` takes a value and may be given once; a relative path is read from the current folder, as `--diff-file` is.
+`check --help` also says that it reads `llm` from the config file for the optional LLM ranking; see LLM Ranking (Optional). The option rules are the same as for `run`. `--summary-file` takes a value and may be given once; a relative path is read from the current folder, as `--diff-file` is. `--skip-llm` makes no ranking call and prints no off line. The API key is read only from `PRCHECK_LLM_API_KEY`.
 
 What happens:
 
@@ -836,7 +839,7 @@ The last two keys of the real output of `node dist/cli.js check --diff-file test
 Off by default. When it is on, `check` sends a short description of the change to one LLM provider after the run, and the provider answers with an order and a one line note for the picked specs and the suggestions. The rules come first and the LLM is advisory:
 
 - It can only re-order and annotate the specs the rules picked and the suggestions the rules made. It never adds, removes or runs a spec, and never changes the selection, the run, the verdict, the heading, the lead, the counts or the exit code.
-- Only `check` calls it, after the run. `select`, `run`, `diff` and `comment` never do. `--dry-run` makes no call, and neither does a run whose verdict is `error` or a check with no picked spec and no suggestion.
+- `check` calls it after the run, unless `--skip-llm` or `--dry-run` is set. `rank` calls it later, on the files `check` wrote, and does not run Playwright. `select`, `run`, `diff` and `comment` never do. A run whose verdict is `error`, and a check with no picked spec and no suggestion, make no call.
 - Any failure (network, timeout, a status, size, a bad answer, input too big) gives one warning and the deterministic order, and the exit code stays what the run gave.
 
 ### LLM Config
@@ -902,7 +905,7 @@ Notes from those pages:
 
 ### Ranked Summary
 
-When the answer is accepted, the Picked Specs and Suggested Tests rows follow the LLM order, Picked Specs gets an `LLM Note` column, a suggestion's note follows its suggested test after `LLM note:`, and each of the two sections starts with a line `Ranked by LLM (advisory)` that names the provider and model. When it is skipped, the summary has the deterministic order and one Warnings row, stderr gets the same line, and inside GitHub Actions without `--json` a `::warning title=qa-core-prcheck::` annotation is printed on stdout after the summary. With `--json` (as the action runs it) no annotation is printed, because the action reads that stdout as JSON; the action learns to read `llm.status` in PR 9.
+When the answer is accepted, the Picked Specs and Suggested Tests rows follow the LLM order, Picked Specs gets an `LLM Note` column, a suggestion's note follows its suggested test after `LLM note:`, and each of the two sections starts with a line `Ranked by LLM (advisory)` that names the provider and model. When it is skipped, the summary has the deterministic order and one Warnings row, stderr gets the same line, and inside GitHub Actions without `--json` a `::warning title=qa-core-prcheck::` annotation is printed on stdout after the summary. With `--json`, the CLI does not print that annotation, because the action reads that stdout as JSON. The action's rank step reads `llm.status` from the JSON and prints the warning itself when the status is `skipped`. A status of `off` is the stderr line only: an unset key is not a warning.
 
 Example made with a fake fetch harness (no request left the box): `runCheck` on `tests/fixtures/diffs/modify.diff` with the fake Playwright CLI and the recorded demo cart report, provider `anthropic`, the placeholder `example-model`, and a fake reply that lists the two picked specs in reverse with one note. The Picked Specs block of the real output:
 
@@ -955,14 +958,48 @@ All are chosen limits:
 
 ### Workflow Wiring
 
-PR 8 changes no workflow and no `action.yml`; the wiring lands in PR 9 together with call caps and redaction. What the GitHub docs say:
+The action ranks in its own step, after Playwright has exited. Call caps stay the ones in LLM Limits (at most two attempts, and the config cannot raise them). A key that is not one printable line, or is longer than 4096 characters, is not sent. The request body is scrubbed of the key before it is sent. What the GitHub docs say:
 
 - The key goes in a repository secret, for example `PRCHECK_LLM_API_KEY` (Settings, Secrets and variables, Actions). [Using secrets in GitHub Actions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
 - "The `secrets` context is not available for composite actions due to security reasons. If you want to pass a secret to a composite action, you need to do it explicitly as an input." ([Contexts reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)). Whether `env:` on the step that uses a composite action reaches its run steps is not confirmed by the docs and is on the live check list.
-- So the planned PR 9 form is an action input: `llm-api-key` in `action.yml`, mapped to `PRCHECK_LLM_API_KEY: ${{ inputs.llm-api-key }}` in the env of its `Run check` step, and `with: llm-api-key: ${{ secrets.PRCHECK_LLM_API_KEY }}` in the workflow.
+- The action inputs are `llm` (default `false`) and `llm-api-key` (default empty). `llm-api-key` is mapped to `PRCHECK_LLM_API_KEY` only on the rank step, and only when `llm` is `true`. The check step unsets `PRCHECK_LLM_API_KEY` before it starts Node.
+- Opt in from a workflow that pins a trusted tag, not `uses: ./`. This repo's `.github/workflows/prcheck.yml` does not set `llm` and does not pass a secret, because `uses: ./` lets the pull request change the action and read a secret passed into it. Forks still receive no secrets.
+
+```yaml
+- uses: sprintsynergyio/qa-core-prcheck@<trusted-tag>
+  with:
+    llm: true
+    llm-api-key: ${{ secrets.PRCHECK_LLM_API_KEY }}
+```
+
 - "With the exception of GITHUB_TOKEN, secrets are not passed to the runner when a workflow is triggered from a forked repository", and "Secrets are not available to workflows triggered by Dependabot events" (same secrets page). An unset secret gives an empty string, so those runs take the off path.
-- `check` removes the key env var `PRCHECK_LLM_API_KEY` from the env of both Playwright runs. That does not keep the key from the PR's test code: in a pull request from a branch of the same repository, that code runs as the same user as `check` and can still read the environment of its parent process, for example `/proc/$PPID/environ` on Linux. So in PR 8 the action does not pass the secret in. PR 9 will run the ranking in a separate step after Playwright has finished, so the key is never in the environment of any process that runs PR code. Pull requests from forks get no secrets at all (above). The removal from the Playwright env stays, as defense in depth.
-- The ranking uses only the env var `PRCHECK_LLM_API_KEY`. The config file comes from the PR itself, so it cannot choose which env var is sent, and a config that sets `llm.apiKeyEnv` exits 2. The retry of a request the provider refuses because the key is malformed stays as it is.
+- `check` still removes `PRCHECK_LLM_API_KEY` from both Playwright runs. That removal does not hide a key that is already in the check process: pull request test code runs as the same user and can read the parent environment, for example `/proc/$PPID/environ` on Linux. The action therefore does not put the key in the check step at all. `rank` runs after that process has exited and does not start Playwright. A local `check` without `--skip-llm` still ranks in the same process when the key is set; that is the desktop path, not the action path. Pull requests from forks get no secrets. The removal from the Playwright env stays, as defense in depth.
+- The ranking uses only the env var `PRCHECK_LLM_API_KEY`. The config file comes from the PR itself, so it cannot choose which env var is sent, and a config that sets `llm.apiKeyEnv` exits 2. A key that is not one printable line, or is longer than 4096 characters, is not sent. A provider rejection of a well-formed key follows the retry rules in LLM Limits.
+
+## Rank Command
+
+Applies the optional LLM ranking to a summary that `check` already wrote. It does not run Playwright, so the API key is not in a process that runs pull request tests. The action runs it after `check --skip-llm`.
+
+```bash
+npm run build
+node dist/cli.js rank --diff-file changes.diff --json
+node dist/cli.js rank --base origin/main --summary-file prcheck-summary.md
+```
+
+Pass the same `--base` or `--diff-file` that `check` used. `rank` reads `prcheck-summary.md`, `prcheck-selection.json` and `prcheck-results.json`. When the selection and the result are both missing, it treats the summary as an error from before the run, appends it to `$GITHUB_STEP_SUMMARY` when that is set, and exits 0. When the diff does not match the selection, it exits 2 and leaves the summary file as `check` wrote it.
+
+| Option | Meaning |
+| --- | --- |
+| `--base <ref>` | Compare against the merge base of this ref and the head |
+| `--head <ref>` | The head ref (default: `HEAD`) |
+| `--diff-file <path>` | Read a saved unified git diff instead of running git |
+| `--root <dir>` | The repository root, where the config file is read (default: the current folder) |
+| `--summary-file <path>` | The summary written by `check` (default: `prcheck-summary.md`) |
+| `--json` | Print one JSON object instead of the summary |
+
+Exit code 0 means ranked, skipped, off, or nothing to rank. Exit code 2 is a usage or tool error. The command never exits 1. With `--json` the object is `{ schemaVersion, llm, summaryRewritten, stepSummary }`. `llm` is null when no ranking was attempted, `{ status: "off" }` when the provider is set and the key is empty, and `{ status: "applied" }` or `{ status: "skipped" }` otherwise. A skipped or applied ranking rewrites the summary. Off does not.
+
+The key is read only from `PRCHECK_LLM_API_KEY`. A key that is not one printable line, or is longer than 4096 characters, is not sent. The request body is scrubbed of the key. At most two HTTP attempts are made, and the config cannot raise that cap.
 
 ## Comment Command
 
@@ -1141,16 +1178,17 @@ jobs:
           retention-days: 7
 ```
 
-The action runs four bash steps:
+The action runs five bash steps:
 
 1. Build the CLI when `dist/cli.js` is missing in the action folder: `npm ci` and `npm run build` there. In this repo the workflow builds first, so this step does nothing here; for another repo it is not tested yet. Playwright is then found from `root`, in that repo's own `node_modules`.
-2. Run `check --base <base> --root <root> --summary-file <file> --json`. The base is the `base-ref` input, or `origin/` plus the `GITHUB_BASE_REF` variable when the input is empty, so no branch name is passed in through `with:`. The step prints the summary to the log, records the exit code and verdict, and always passes. `check` also appends the summary to the job summary.
-3. When `comment` is `true`, run `comment --summary-file <file>` with `PRCHECK_COMMENT_AUTHOR` set from `comment-author`, record its exit code, and pass.
-4. Map the exit codes (see Advisory Mode).
+2. Run `check --base <base> --root <root> --summary-file <file> --timeout-minutes <n> --skip-llm --json`. The base is the `base-ref` input, or `origin/` plus the `GITHUB_BASE_REF` variable when the input is empty, so no branch name is passed in through `with:`. The step clears `GITHUB_STEP_SUMMARY` and unsets `PRCHECK_LLM_API_KEY`, prints the summary to the log, records the exit code, verdict and base ref, and always passes. It does not append the job summary.
+3. When the check step recorded a base ref, run `rank` with the same base, root and summary file. The API key is in this step only, and only when `llm` is `true`. A skipped ranking prints a `::warning::`. The step appends the final summary to the job summary and always passes.
+4. When `comment` is `true`, run `comment --summary-file <file>` with `PRCHECK_COMMENT_AUTHOR` set from `comment-author`, record its exit code, and pass.
+5. Map the exit codes (see Advisory Mode). A tool error from check, rank or comment fails the step.
 
 Every input reaches a script through `env:` and is used as a quoted shell variable, never as an expression inside `run:`, which GitHub's docs on [script injections](https://docs.github.com/en/actions/concepts/security/script-injections) warn about. Playwright runs as with `run`: always with `--forbid-only`, with `CI` passed through, and with the git capture and reporter variables removed. GitHub Actions sets `CI` to `true` ("Always set to `true`", [variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)), so in the Action the demo config's `forbidOnly` is on and it uses 2 workers.
 
-The action tags are `v7`, the majors the [checkout](https://github.com/actions/checkout), [setup-node](https://github.com/actions/setup-node) and [upload-artifact](https://github.com/actions/upload-artifact) READMEs show. Their `v7` tags declare the `node24` runtime; `ci.yml` still uses `v4`, which declares `node20`, and moving it is a follow-up.
+The action tags are `v7`, the majors the [checkout](https://github.com/actions/checkout), [setup-node](https://github.com/actions/setup-node) and [upload-artifact](https://github.com/actions/upload-artifact) READMEs show. Their `v7` tags declare the `node24` runtime. `ci.yml` uses the same `checkout` and `setup-node` majors.
 
 ### Action Inputs
 
@@ -1159,10 +1197,13 @@ The action tags are `v7`, the majors the [checkout](https://github.com/actions/c
 | `base-ref` | empty | The git ref to compare against. Empty means `origin/` plus the base branch from `GITHUB_BASE_REF` |
 | `root` | `.` | The repository root, relative to the workspace |
 | `summary-file` | `prcheck-summary.md` | Where `check` writes the summary, relative to the workspace |
+| `timeout-minutes` | `30` | Kill timeout for Playwright, a whole number from 1 to 30. The pull request config cannot raise it |
 | `comment` | `true` | `true` to post or update the sticky PR comment |
 | `github-token` | `${{ github.token }}` | The token for the comment; needs `pull-requests: write`. With a token other than the default, also set `comment-author`. A token that cannot write comments gets a warning and the job summary only |
 | `comment-author` | `github-actions[bot]` | The login whose comment is updated in place. Set it when `github-token` is an App token (the app's `[bot]` login) or a personal access token (your own login) |
 | `fail-on-test-failure` | `false` | `true` to fail the step when a picked test fails |
+| `llm` | `false` | `true` to allow one optional ranking call after Playwright exits. Off unless a workflow opts in |
+| `llm-api-key` | empty | The API key for the rank step only. Ignored unless `llm` is `true`. Never passed to the Playwright step |
 
 ### Action Outputs
 
@@ -1170,18 +1211,20 @@ The action tags are `v7`, the majors the [checkout](https://github.com/actions/c
 | --- | --- |
 | `exit-code` | The exit code of `check`: `0`, `1` or `2` |
 | `verdict` | The summary verdict: `passed`, `failed`, `no-tests-needed`, `not-run` or `error` |
+| `llm-status` | `applied`, `skipped`, `off`, or `none` when ranking did not run or was not attempted |
 
 ### Advisory Mode
 
 v1 is advisory: a failed test is reported, but it does not fail the job. A tool error does.
 
-| check exit | comment exit | `fail-on-test-failure` | The action step |
-| --- | --- | --- | --- |
-| 0 | 0 or skipped | any | Passes |
-| 1 | 0 or skipped | `false` | Passes, with a `::warning::` annotation |
-| 1 | 0 or skipped | `true` | Fails, with an `::error::` annotation |
-| 2 | any | any | Fails, with an `::error::` annotation |
-| any | 2 | any | Fails, with an `::error::` annotation |
+| check exit | rank exit | comment exit | `fail-on-test-failure` | The action step |
+| --- | --- | --- | --- | --- |
+| 0 | 0 or skipped | 0 or skipped | any | Passes |
+| 1 | 0 or skipped | 0 or skipped | `false` | Passes, with a `::warning::` annotation |
+| 1 | 0 or skipped | 0 or skipped | `true` | Fails, with an `::error::` annotation |
+| 2 | any | any | any | Fails, with an `::error::` annotation |
+| any | 2 | any | any | Fails, with an `::error::` annotation |
+| any | any | 2 | any | Fails, with an `::error::` annotation |
 
 The check and comment steps record their exit codes and always pass, so the comment is still posted for a failed run, and the last step decides. `continue-on-error` is not used: it "Prevents a job from failing when a step fails" ([workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)), which would hide a tool error too. The artifact step has `if: always()`, so it runs even when the action step failed. Actions jobs show on the pull request as checks with a conclusion such as `success` or `failure` ([about status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks)); where the warning annotation shows is not confirmed. See Live Checks.
 
@@ -1230,7 +1273,7 @@ Still open, for the live checks on throwaway pull requests:
 - PR 7: a new Page Object method that no spec calls and a new Page Object that no spec imports give the `unused-member` and `unimported-support` rows.
 - PR 7: a failing test title with an `@` login, `#1`, `GH-1`, `owner/repo#1` and `$x$` pings nobody, links nothing and renders no math, in the PR comment and in the job summary.
 - PR 7b: a failing test title with `https://example.com/docs#1-intro` and `#1` shows one working link whose address is exactly `https://example.com/docs#1-intro`, and `#1` as plain text, in the PR comment (the job summary cannot be read through the API; check it by eye).
-- PR 7b review: the same title also holding `https://example.com/@sprintsynergyhq` shows a second working link with exactly that address, and no mention notification reaches `sprintsynergyhq` (GitHub notifications and the PR timeline show none).
+- PR 7b review: the same title also holding `https://example.com/@sardar-usman` shows a second working link with exactly that address, and no mention notification reaches `sardar-usman` (GitHub notifications and the PR timeline show none).
 - Whether a reference inside a path in a code span links anything. No demo path holds one, so this is not checked.
 - PR 8: the prcheck run on the PR 8 pull request has no LLM line (the LLM is off).
 - PR 8: with the secret, a real model and the env line on a throwaway branch, the comment shows `Ranked by LLM (advisory)`, the same picked specs and the same exit code, and the log shows no key.
@@ -1253,8 +1296,8 @@ Not confirmed and not live checked: the `<app-slug>[bot]` login and `Bot` type o
 - PR 7b: raw URLs in the summary text (done)
 - PR 8: optional LLM ranking, advisory and off by default (done)
 - v0.1.0: release prep, npm package `@sprintsynergy/qa-core-prcheck` (done)
-- PR 9: safety and cost guards. The opt-in `--forbid-only` planned here is no longer needed: PR 6a passes it on every run
-- PR 10: eval fixtures and docs
+- PR 9: safety and cost guards (in this tree, not yet published): config size and count limits, a kill timeout capped at 30 minutes, `rank` after Playwright, and an action that keeps the API key out of the Playwright step unless a workflow sets `llm: true`. The opt-in `--forbid-only` once planned here is not a flag: PR 6a passes it on every run
+- PR 10: eval fixtures and docs (not in this tree; the unit fixtures under `tests/fixtures/` stay the regression suite)
 
 ## License
 

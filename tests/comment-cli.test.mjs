@@ -63,6 +63,7 @@ Commands:
   select          Pick the Playwright specs a change can affect (does not run them)
   run             Run the picked Playwright specs and report the results
   check           Pick, run and summarize: writes the Markdown summary for the PR
+  rank            Apply optional LLM ranking to a summary that check already wrote
   comment         Post or update the sticky PR comment from a summary file
 
 Options:

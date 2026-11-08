@@ -1,4 +1,4 @@
-# qa-core-prcheck as a composite action: check, then the sticky PR comment, then the exit code mapping.
+# qa-core-prcheck as a composite action: check, then rank, then the sticky PR comment, then the exit code mapping.
 # Inputs reach the scripts only through env: and are used as quoted shell variables, never as
 # expressions inside run:. Metadata syntax: https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax
 name: qa-core-prcheck
@@ -17,6 +17,10 @@ inputs:
     description: Where check writes the Markdown summary, relative to the workspace.
     required: false
     default: prcheck-summary.md
+  timeout-minutes:
+    description: Kill timeout for the Playwright run, a whole number of minutes from 1 to 30. The pull request config cannot raise it.
+    required: false
+    default: '30'
   comment:
     description: true to post or update the sticky PR comment. The comment command skips fork pull requests itself.
     required: false
@@ -33,6 +37,14 @@ inputs:
     description: true to fail when a picked test fails. Off by default, because v1 is advisory.
     required: false
     default: 'false'
+  llm:
+    description: true to allow one optional LLM ranking call after Playwright exits. Off by default. Also set llm-api-key. The pull request config chooses the provider only when this is true.
+    required: false
+    default: 'false'
+  llm-api-key:
+    description: Optional API key for the rank step only, mapped to PRCHECK_LLM_API_KEY. Ignored unless llm is true. Never passed to the Playwright step. Fork pull requests do not receive secrets.
+    required: false
+    default: ''
 
 outputs:
   exit-code:
@@ -41,6 +53,9 @@ outputs:
   verdict:
     description: The summary verdict. passed, failed, no-tests-needed, not-run or error.
     value: ${{ steps.check.outputs.verdict }}
+  llm-status:
+    description: applied, skipped, off, or none when ranking did not run or was not attempted.
+    value: ${{ steps.rank.outputs.llm-status }}
 
 runs:
   using: composite
@@ -56,7 +71,8 @@ runs:
           npm run build --prefix "$GITHUB_ACTION_PATH"
         fi
 
-    # Records the exit code and verdict and always passes, so the comment and the mapping still run.
+    # Records the exit code and verdict and always passes, so rank, the comment and the mapping still run.
+    # The API key is unset here. Ranking runs in the next step, after Playwright has exited.
     - name: Run check
       id: check
       shell: bash
@@ -65,6 +81,7 @@ runs:
         BASE_REF: ${{ inputs.base-ref }}
         ROOT: ${{ inputs.root }}
         SUMMARY_FILE: ${{ inputs.summary-file }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
       run: |
         base="$BASE_REF"
         if [ -z "$base" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
@@ -76,15 +93,78 @@ runs:
           echo "verdict=error" >> "$GITHUB_OUTPUT"
           exit 0
         fi
+        case "$base" in
+          *[$'\n\r']*)
+            echo "::error title=qa-core-prcheck::The base ref contains a line break."
+            echo "exit-code=2" >> "$GITHUB_OUTPUT"
+            echo "verdict=error" >> "$GITHUB_OUTPUT"
+            exit 0
+            ;;
+        esac
+        case "$TIMEOUT_MINUTES" in
+          30|[12][0-9]|[1-9]) ;;
+          *)
+            echo "::error title=qa-core-prcheck::timeout-minutes must be a whole number from 1 to 30."
+            echo "exit-code=2" >> "$GITHUB_OUTPUT"
+            echo "verdict=error" >> "$GITHUB_OUTPUT"
+            exit 0
+            ;;
+        esac
+        # This step must not append the summary: rank writes the final text. A key inherited from
+        # the job must not reach Playwright, which runs pull request code.
+        export GITHUB_STEP_SUMMARY=
+        unset PRCHECK_LLM_API_KEY
+        echo "base-ref=$base" >> "$GITHUB_OUTPUT"
         json="$RUNNER_TEMP/prcheck-check.json"
         code=0
-        node "$GITHUB_ACTION_PATH/dist/cli.js" check --base "$base" --root "$ROOT" --summary-file "$SUMMARY_FILE" --json > "$json" || code=$?
+        node "$GITHUB_ACTION_PATH/dist/cli.js" check --base "$base" --root "$ROOT" --summary-file "$SUMMARY_FILE" --timeout-minutes "$TIMEOUT_MINUTES" --skip-llm --json > "$json" || code=$?
         verdict=$(node -e 'try { process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).summary.verdict); } catch { process.stdout.write("error"); }' "$json")
         if [ -f "$SUMMARY_FILE" ]; then
           cat "$SUMMARY_FILE"
         fi
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+    # One ranking call at most, after Playwright has exited. llm false drops the key before node starts.
+    - name: Rank the summary
+      id: rank
+      if: steps.check.outputs.base-ref != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        BASE_REF: ${{ steps.check.outputs.base-ref }}
+        ROOT: ${{ inputs.root }}
+        SUMMARY_FILE: ${{ inputs.summary-file }}
+        LLM_ENABLED: ${{ inputs.llm }}
+        PRCHECK_LLM_API_KEY: ${{ inputs.llm-api-key }}
+      run: |
+        base="$BASE_REF"
+        if [ "$LLM_ENABLED" != "true" ]; then
+          unset PRCHECK_LLM_API_KEY
+        elif [ -n "${PRCHECK_LLM_API_KEY:-}" ]; then
+          case "$PRCHECK_LLM_API_KEY" in
+            *[$'\n\r''%']*)
+              echo "::warning title=qa-core-prcheck::LLM ranking is off: the API key is not a single token, so it was not used."
+              unset PRCHECK_LLM_API_KEY
+              ;;
+            *)
+              printf '%s\n' "::add-mask::${PRCHECK_LLM_API_KEY}"
+              ;;
+          esac
+        fi
+        json="$RUNNER_TEMP/prcheck-rank.json"
+        code=0
+        node "$GITHUB_ACTION_PATH/dist/cli.js" rank --base "$base" --root "$ROOT" --summary-file "$SUMMARY_FILE" --json > "$json" || code=$?
+        status=$(node -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const s = j.llm && j.llm.status; process.stdout.write(s === "applied" || s === "skipped" || s === "off" ? s : "none"); } catch { process.stdout.write("none"); }' "$json")
+        if [ "$status" = "skipped" ]; then
+          reason=$(node -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const t = String((j.llm && j.llm.reason) || ""); process.stdout.write(t.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")); } catch { process.stdout.write(""); }' "$json")
+          echo "::warning title=qa-core-prcheck::LLM ranking skipped: ${reason}. The deterministic order is used."
+        fi
+        if [ -f "$SUMMARY_FILE" ]; then
+          cat "$SUMMARY_FILE"
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "llm-status=$status" >> "$GITHUB_OUTPUT"
 
     # Records the exit code and always passes, so the mapping still runs.
     - name: Post or update the PR comment
@@ -106,11 +186,12 @@ runs:
       shell: bash
       env:
         CHECK_EXIT: ${{ steps.check.outputs.exit-code }}
+        RANK_EXIT: ${{ steps.rank.outputs.exit-code }}
         COMMENT_EXIT: ${{ steps.comment.outputs.exit-code }}
         FAIL_ON_TEST_FAILURE: ${{ inputs.fail-on-test-failure }}
       run: |
-        if [ "$CHECK_EXIT" = "2" ] || [ "$COMMENT_EXIT" = "2" ]; then
-          echo "::error title=qa-core-prcheck::A tool error stopped the check or the comment (check exit ${CHECK_EXIT:-none}, comment exit ${COMMENT_EXIT:-skipped}). See the log above."
+        if [ "$CHECK_EXIT" = "2" ] || [ "$RANK_EXIT" = "2" ] || [ "$COMMENT_EXIT" = "2" ]; then
+          echo "::error title=qa-core-prcheck::A tool error stopped the check, the rank step or the comment (check exit ${CHECK_EXIT:-none}, rank exit ${RANK_EXIT:-skipped}, comment exit ${COMMENT_EXIT:-skipped}). See the log above."
           exit 1
         fi
         if [ "$CHECK_EXIT" = "1" ]; then

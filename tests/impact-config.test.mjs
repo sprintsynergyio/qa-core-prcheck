@@ -179,6 +179,25 @@ for (const [label, content, message] of LLM_BAD) {
   });
 }
 
+test('limits: too many areas, tags, globs, a long tag, a control character and a huge file are rejected', (t) => {
+  const areas = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`src/${i}.ts`, ['@cart']]));
+  throwsImpactError(withConfig(t, { areas }), '"areas" has more than 100 globs');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': Array.from({ length: 21 }, (_, i) => `@t${i}`) } }),
+    '"areas" value for "src/**" has more than 20 tags');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': ['@'] } }),
+    '"areas" tag for "src/**" must be @ followed by 1 to 63 characters and no whitespace');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': [`@${'a'.repeat(64)}`] } }),
+    '"areas" tag for "src/**" must be @ followed by 1 to 63 characters and no whitespace');
+  throwsImpactError(withConfig(t, { ignore: ['docs/**\nsecret'] }), '"ignore" glob must not contain control characters');
+  throwsImpactError(withConfig(t, { fullSuiteOn: ['x'.repeat(301)] }), '"fullSuiteOn" glob is longer than 300 characters');
+  throwsImpactError(withConfig(t, { ignore: Array.from({ length: 101 }, (_, i) => `f${i}.md`) }),
+    '"ignore" has more than 100 globs');
+  throwsImpactError(withConfig(t, { playwrightDir: 'd'.repeat(201) }),
+    '"playwrightDir" must be at most 200 characters and must not contain control characters');
+  const huge = withConfig(t, `{${' '.repeat(70_000)}"playwrightDir":"."}`);
+  throwsImpactError(huge, 'the file is larger than 65536 bytes');
+});
+
 test('llm: loadLlmConfig keeps the file errors of loadConfig', (t) => {
   assert.throws(() => loadLlmConfig(withConfig(t, '{')), (e) => e instanceof ImpactError && e.message.startsWith('qa-core-prcheck.config.json is not valid JSON: '));
   assert.throws(() => loadLlmConfig(withConfig(t, '[]')), (e) => e.message === 'qa-core-prcheck.config.json: the top level must be a JSON object');

@@ -16,6 +16,10 @@ import { validateAnswer } from './validate.js';
 
 const ADAPTERS: Record<LlmProvider, LlmAdapter> = { anthropic, openai, gemini };
 
+// A chosen limit. The config cannot name another env var or raise this cap. A key outside this
+// shape is not sent: it could break log masking or be a pasted multi-line secret.
+export const LLM_KEY_MAX_CHARS = 4096;
+
 export interface RankInput {
   config: LlmConfig;
   env: NodeJS.ProcessEnv;       // where the key is read: env[DEFAULT_API_KEY_ENV]
@@ -32,6 +36,16 @@ const realSleep: SleepLike = (ms) => new Promise((resolve) => { setTimeout(resol
 /** The key value, or '' when the env var is unset. */
 function keyOf(env: NodeJS.ProcessEnv): string {
   return env[DEFAULT_API_KEY_ENV] ?? '';
+}
+
+/**
+ * Why this key must not be sent, or null when it is one line of printable ASCII.
+ * The reason never includes the key.
+ */
+export function llmKeyProblem(key: string): string | null {
+  if (key.length > LLM_KEY_MAX_CHARS) return `the API key is longer than ${LLM_KEY_MAX_CHARS} characters`;
+  if (!/^[\x21-\x7e]+$/.test(key)) return 'the API key is not a single printable token';
+  return null;
 }
 
 /** The one stderr line for a provider with no key, or null. */
@@ -62,9 +76,13 @@ export async function rankWithLlm(input: RankInput): Promise<Ranking | null> {
 
   const provider = config.provider;
   const model = config.model;
+  const problem = llmKeyProblem(key);
+  if (problem !== null) return { status: 'skipped', provider, model, reason: problem };
   const scrub = (text: string): string => text.split(key).join('***');
   try {
-    const data = buildPromptData(diff, selection, result, shown);
+    // The key is removed from the data before the size check and before the request, in case a
+    // path, title or reason from the pull request repeats it.
+    const data = scrub(buildPromptData(diff, selection, result, shown));
     if (Buffer.byteLength(LLM_INSTRUCTION) + Buffer.byteLength(data) > LLM_MAX_INPUT_BYTES) {
       throw new LlmError(`the input is over ${LLM_MAX_INPUT_BYTES} bytes`);
     }

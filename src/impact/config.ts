@@ -1,15 +1,26 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_API_KEY_ENV, PROVIDER_NAMES, type LlmConfig, type ProviderName } from '../llm/types.js';
 import { ImpactError, type ImpactConfig } from './types.js';
 
 export const CONFIG_FILE = 'qa-core-prcheck.config.json';
 
+// Chosen limits. The file comes from the pull request under check, so an unbounded config could
+// make selection or a later ranking step do unbounded work. These caps are not raised by any key.
+export const CONFIG_MAX_BYTES = 65_536;
+export const MAX_AREAS = 100;
+export const MAX_TAGS_PER_AREA = 20;
+export const MAX_TAG_CHARS = 64;
+export const MAX_GLOB_CHARS = 300;
+export const MAX_GLOB_LIST = 100;
+export const MAX_PLAYWRIGHT_DIR_CHARS = 200;
+
 const ALLOWED_KEYS = ['playwrightDir', 'areas', 'fullSuiteOn', 'ignore', 'llm'];
 const LLM_KEYS = ['provider', 'model'];
 // A chosen limit and pattern: it fits the documented example model ids and keeps the Gemini URL path
 // safe without encoding.
 const MODEL_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const DEFAULT_PLAYWRIGHT_DIR = 'demo/saucedemo';
 
 // Plain code unit order, so the result never depends on the machine locale.
@@ -31,6 +42,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function readPlaywrightDir(value: unknown): string {
   if (typeof value !== 'string' || value === '') fail('"playwrightDir" must be a non-empty string');
+  if (value.length > MAX_PLAYWRIGHT_DIR_CHARS || CONTROL_CHARS.test(value)) {
+    fail(`"playwrightDir" must be at most ${MAX_PLAYWRIGHT_DIR_CHARS} characters and must not contain control characters`);
+  }
   const slashed = value.replaceAll('\\', '/');
   if (path.posix.isAbsolute(slashed) || path.win32.isAbsolute(value)) {
     fail(`"playwrightDir" must be relative to the root, not absolute: ${value}`);
@@ -41,15 +55,30 @@ function readPlaywrightDir(value: unknown): string {
   return normalized === '' ? '.' : normalized;
 }
 
+function readGlobText(key: string, glob: string): void {
+  if (glob.length > MAX_GLOB_CHARS) fail(`"${key}" glob is longer than ${MAX_GLOB_CHARS} characters`);
+  if (CONTROL_CHARS.test(glob)) fail(`"${key}" glob must not contain control characters`);
+}
+
 function readAreas(value: unknown): ImpactConfig['areas'] {
   if (!isObject(value)) fail('"areas" must be an object that maps a glob to a list of tags');
-  return Object.entries(value)
+  const entries = Object.entries(value);
+  if (entries.length > MAX_AREAS) fail(`"areas" has more than ${MAX_AREAS} globs`);
+  return entries
     .map(([glob, tags]) => {
       if (glob === '') fail('"areas" has an empty glob');
+      readGlobText('areas', glob);
       const valid = Array.isArray(tags) && tags.length > 0
         && tags.every((tag) => typeof tag === 'string' && tag.startsWith('@'));
       if (!valid) fail(`"areas" value for "${glob}" must be a non-empty array of tags that start with @`);
-      return { glob, tags: sortedUnique(tags as string[]) };
+      const list = tags as string[];
+      if (list.length > MAX_TAGS_PER_AREA) fail(`"areas" value for "${glob}" has more than ${MAX_TAGS_PER_AREA} tags`);
+      for (const tag of list) {
+        if (tag.length < 2 || tag.length > MAX_TAG_CHARS || /[\s\u0000-\u001f\u007f]/.test(tag)) {
+          fail(`"areas" tag for "${glob}" must be @ followed by 1 to ${MAX_TAG_CHARS - 1} characters and no whitespace`);
+        }
+      }
+      return { glob, tags: sortedUnique(list) };
     })
     .sort((a, b) => compareText(a.glob, b.glob));
 }
@@ -57,7 +86,10 @@ function readAreas(value: unknown): ImpactConfig['areas'] {
 function readGlobList(key: 'fullSuiteOn' | 'ignore', value: unknown): string[] {
   const valid = Array.isArray(value) && value.every((glob) => typeof glob === 'string' && glob !== '');
   if (!valid) fail(`"${key}" must be an array of non-empty strings`);
-  return sortedUnique(value as string[]);
+  const globs = value as string[];
+  if (globs.length > MAX_GLOB_LIST) fail(`"${key}" has more than ${MAX_GLOB_LIST} globs`);
+  for (const glob of globs) readGlobText(key, glob);
+  return sortedUnique(globs);
 }
 
 /** The parsed top-level object of <root>/qa-core-prcheck.config.json, or null when the file does not exist. */
@@ -65,11 +97,16 @@ function readConfigObject(root: string): Record<string, unknown> | null {
   const file = path.join(root, CONFIG_FILE);
   let text: string;
   try {
+    const stat = statSync(file);
+    if (!stat.isFile()) throw new ImpactError(`Cannot read ${CONFIG_FILE}`);
+    if (stat.size > CONFIG_MAX_BYTES) fail(`the file is larger than ${CONFIG_MAX_BYTES} bytes`);
     text = readFileSync(file, 'utf8');
   } catch (error) {
+    if (error instanceof ImpactError) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new ImpactError(`Cannot read ${CONFIG_FILE}`);
   }
+  if (Buffer.byteLength(text) > CONFIG_MAX_BYTES) fail(`the file is larger than ${CONFIG_MAX_BYTES} bytes`);
 
   let json: unknown;
   try {
