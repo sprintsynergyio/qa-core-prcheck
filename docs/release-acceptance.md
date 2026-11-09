@@ -1,6 +1,6 @@
 # Release acceptance
 
-Checklist for version 0.2.0, released on 2026-11-09 (npm `@sprintsynergy/qa-core-prcheck@0.2.0`, tag `v0.2.0`). This file is not a claim that a pull request is safe to merge.
+Checklist for version 0.2.0, released on 2026-11-09 (npm `@sprintsynergy/qa-core-prcheck@0.2.0`, tag `v0.2.0`), and for 0.2.1, a docs-only patch of it (tag `v0.2.1`). This file is not a claim that a pull request is safe to merge.
 
 Product rules that stay in force:
 
@@ -24,7 +24,7 @@ Visual checks, and which of them block a merge:
 
 - The marker in a pull request comment is already confirmed on comment 6726882681. No further comment-page inspection is required for that.
 - The job summary page is still unseen. The marker is an HTML comment, and the comment renderer already hid it. Looking at one job summary is optional follow-up, not a merge blocker.
-- A throwaway pull request for live `@`, `#1`, `GH-1`, `$`, and URL titles is optional follow-up. `npm run eval` checks those bytes. This tree does not create that pull request.
+- A throwaway pull request for live `@`, `#1`, `GH-1`, `$`, and URL titles is optional follow-up. `npm run eval` checks those bytes. No such pull request has been made.
 
 ## Release checklist
 
@@ -37,7 +37,19 @@ Visual checks, and which of them block a merge:
 - [x] CLI CI is scheduled on Linux, Windows, and macOS. Record the run URLs on the pull request after they finish.
 - [x] Fork comment guards are executed locally: same-repo versus fork, null head, case mismatch, and Dependabot. The live fork end-to-end path is unexercised and is not a merge blocker.
 - [ ] Optional follow-up, not a merge blocker: glance at one job summary, and only if wanted, a throwaway pull request for the live escape titles above.
-- [x] Tagged `v0.2.0` at `16eaee6` and published to npm on 2026-11-09. A workflow that sets `llm: true` with a real key pins `sprintsynergyio/qa-core-prcheck@v0.2.0`.
+- [x] Tagged `v0.2.0` at `16eaee6` and published to npm on 2026-11-09.
+- [x] The published action tag runs from a workflow, builds its own CLI, and keeps one sticky comment across pushes. See Published action evidence.
+- 0.2.1 release steps, done by the owner: merge, tag `v0.2.1` at the merge commit, publish to npm, and create the GitHub Release. A workflow that sets `llm: true` with a real key pins `sprintsynergyio/qa-core-prcheck@v0.2.1`.
+
+## Published action evidence
+
+Checked on 2026-11-09 on draft pull request #3 (E2E proof, not merged), with a workflow that uses `sprintsynergyio/qa-core-prcheck@v0.2.0`, not `uses: ./`, on `ubuntu-24.04`, by reading the API and the job logs:
+
+- The runner downloaded the action at `16eaee6`. The tag has no `dist/`, so the action's first step ran `npm ci` and `npm run build` in the action folder.
+- Run 42617287988 (a `cart-page.ts` change): 2 of 4 specs picked, each with the reason `demo/saucedemo/pages/cart-page.ts is imported by <spec>`, 4 of 4 tests passed, exit code 0, verdict `passed`, and `Comment created` for comment 6740072262.
+- Run 42617704273 (a second push, adding a `login-page.ts` change): 4 of 4 specs picked, 8 of 8 tests passed, and `Comment updated` for the same comment 6740072262. The pull request still has one comment, from `github-actions[bot]`, type `Bot`.
+- The published npm CLI `@sprintsynergy/qa-core-prcheck@0.2.0`, installed fresh, gave the same selection and a passed check on the same diff on a Linux machine.
+- The job summary page cannot be read through the API, so it is still unseen.
 
 ## Still out of scope
 

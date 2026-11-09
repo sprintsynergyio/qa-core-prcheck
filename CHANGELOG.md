@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 (2026-11-09)
+
+Docs and package metadata only. No code changes: the CLI, the action, the config rules and the exit codes are the same as 0.2.0.
+
+- The README in the npm package said 0.2.0 was not published yet. The README, this changelog and `docs/release-acceptance.md` now say the release is published, on npm and as a git tag.
+- Install and action examples pin the current release: `npm install --save-dev @sprintsynergy/qa-core-prcheck@0.2.1` and `uses: sprintsynergyio/qa-core-prcheck@v0.2.1`.
+- README: a Use From Another Repository workflow example that pins the release tag, and the action's build step is no longer described as untested for another repo.
+- `docs/release-acceptance.md`: Published action evidence from draft pull request #3, where a workflow using `sprintsynergyio/qa-core-prcheck@v0.2.0` built the CLI from the tag, picked and passed the specs, and updated one sticky comment across two pushes.
+- `package.json` and `package-lock.json` are version 0.2.1.
+
 ## 0.2.0 (2026-11-09)
 
 Safety and cost guards, a rule eval, and Windows and macOS CLI coverage, on top of 0.1.0. Published on npm as `@sprintsynergy/qa-core-prcheck@0.2.0` and tagged `v0.2.0`.
