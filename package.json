@@ -1,6 +1,6 @@
 {
   "name": "@sprintsynergy/qa-core-prcheck",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "CI PR check agent: reads a pull request diff, picks the related Playwright tests, runs them and posts a pass or fail summary.",
   "keywords": [
     "playwright",

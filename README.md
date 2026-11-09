@@ -4,7 +4,7 @@ A CI agent for GitHub Actions that reads a pull request diff, picks the Playwrig
 
 ## Status
 
-Version 0.2.0 is the version in this tree. It is not published yet. The npm registry still has 0.1.0 until the owner publishes. See [CHANGELOG.md](CHANGELOG.md). The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
+Version 0.2.1 is the current release: npm package `@sprintsynergy/qa-core-prcheck`, git tag `v0.2.1` ([releases](https://github.com/sprintsynergyio/qa-core-prcheck/releases)). It is a docs-only patch of 0.2.0, released 2026-11-09: the CLI, the action and their behavior are the same. See [CHANGELOG.md](CHANGELOG.md). The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
 
 ## Requirements
 
@@ -20,7 +20,7 @@ Version 0.2.0 is the version in this tree. It is not published yet. The npm regi
 Install it as a dev dependency in the repository that holds your Playwright tests. It uses that repository's own `@playwright/test`. `@playwright/test` 1.60.0 or later is a peer dependency: 1.60.0 is the version this tool is tested against, and the Playwright behavior described below was checked in that version.
 
 ```bash
-npm install --save-dev @sprintsynergy/qa-core-prcheck
+npm install --save-dev @sprintsynergy/qa-core-prcheck@0.2.1
 npx qa-core-prcheck --version
 ```
 
@@ -967,7 +967,7 @@ The action ranks in its own step, after Playwright has exited. Call caps stay th
 - Opt in from a workflow that pins a trusted tag, not `uses: ./`. This repo's `.github/workflows/prcheck.yml` does not set `llm` and does not pass a secret, because `uses: ./` lets the pull request change the action and read a secret passed into it. Forks still receive no secrets.
 
 ```yaml
-- uses: sprintsynergyio/qa-core-prcheck@<trusted-tag>
+- uses: sprintsynergyio/qa-core-prcheck@v0.2.1
   with:
     llm: true
     llm-api-key: ${{ secrets.PRCHECK_LLM_API_KEY }}
@@ -1182,9 +1182,45 @@ jobs:
           retention-days: 7
 ```
 
+### Use From Another Repository
+
+Another repository pins a release tag instead of `uses: ./`. It runs `npm ci` for its own `@playwright/test` and installs Chromium; it does not build this tool, because the action builds its own CLI. Add `qa-core-prcheck.config.json` with `playwrightDir` (see Install):
+
+```yaml
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  prcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - uses: sprintsynergyio/qa-core-prcheck@v0.2.1
+        with:
+          comment: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+```
+
+Live check on 2026-11-09, draft pull request #3 (E2E proof, not merged): this setup with `sprintsynergyio/qa-core-prcheck@v0.2.0` built the CLI from the tag, picked 2 of 4 demo specs with their reasons, passed, and created the sticky comment. A second push picked 4 of 4 and updated the same comment (same comment id, `github-actions[bot]`, type `Bot`).
+
 The action runs five bash steps:
 
-1. Build the CLI when `dist/cli.js` is missing in the action folder: `npm ci` and `npm run build` there. In this repo the workflow builds first, so this step does nothing here; for another repo it is not tested yet. Playwright is then found from `root`, in that repo's own `node_modules`.
+1. Build the CLI when `dist/cli.js` is missing in the action folder: `npm ci` and `npm run build` there. In this repo the workflow builds first, so this step does nothing here. A workflow that uses a published tag gets the action without `dist/`, so this step builds it; that path ran on the E2E proof pull request #3 with `@v0.2.0`. Playwright is then found from `root`, in that repo's own `node_modules`.
 2. Run `check --base <base> --root <root> --summary-file <file> --timeout-minutes <n> --skip-llm --json`. The base is the `base-ref` input, or `origin/` plus the `GITHUB_BASE_REF` variable when the input is empty, so no branch name is passed in through `with:`. The step clears `GITHUB_STEP_SUMMARY` and unsets `PRCHECK_LLM_API_KEY`, prints the summary to the log, records the exit code, verdict and base ref, and always passes. It does not append the job summary.
 3. When the check step recorded a base ref, run `rank` with the same base, root and summary file. The API key is in this step only, and only when `llm` is `true`. A skipped ranking prints a `::warning::`. The step appends the final summary to the job summary and always passes.
 4. When `comment` is `true`, run `comment --summary-file <file>` with `PRCHECK_COMMENT_AUTHOR` set from `comment-author`, record its exit code, and pass.
@@ -1300,8 +1336,10 @@ Not confirmed and not live checked: the `<app-slug>[bot]` login and `Bot` type o
 - PR 7b: raw URLs in the summary text (done)
 - PR 8: optional LLM ranking, advisory and off by default (done)
 - v0.1.0: release prep, npm package `@sprintsynergy/qa-core-prcheck` (done)
-- PR 9: safety and cost guards (in this tree, not yet published): config size and count limits, a kill timeout capped at 30 minutes, `rank` after Playwright, and an action that keeps the API key out of the Playwright step unless a workflow sets `llm: true`. The opt-in `--forbid-only` once planned here is not a flag: PR 6a passes it on every run
-- PR 10: eval fixtures and docs (not in this tree; the unit fixtures under `tests/fixtures/` stay the regression suite)
+- PR 9: safety and cost guards (released in v0.2.0): config size and count limits, a kill timeout capped at 30 minutes, `rank` after Playwright, and an action that keeps the API key out of the Playwright step unless a workflow sets `llm: true`. The opt-in `--forbid-only` once planned here is not a flag: PR 6a passes it on every run
+- PR 10: eval fixtures and docs (released in v0.2.0 as `npm run eval`; the unit fixtures under `tests/fixtures/` stay the regression suite)
+- v0.2.0: released 2026-11-09, npm and GitHub Release (done)
+- v0.2.1: docs-only patch, so the README on the npm page says the release is published (done)
 
 ## License
 
