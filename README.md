@@ -4,7 +4,7 @@ A CI agent for GitHub Actions that reads a pull request diff, picks the Playwrig
 
 ## Status
 
-Version 0.2.0 is the version in this tree. It is not published yet. The npm registry still has 0.1.0 until the owner publishes. See [CHANGELOG.md](CHANGELOG.md). The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
+Version 0.2.0 is published on npm as `@sprintsynergy/qa-core-prcheck` and tagged `v0.2.0` ([release notes](https://github.com/sprintsynergyio/qa-core-prcheck/releases/tag/v0.2.0)). See [CHANGELOG.md](CHANGELOG.md). The CLI lists the files a change touches, picks the Playwright specs the change can affect with a written reason for each pick, runs only those specs with a typed pass or fail result and exit code, suggests missing tests, and writes one Markdown summary. The GitHub Action runs this on every pull request of this repo and keeps the summary in one sticky PR comment. Optional LLM ranking (Anthropic, OpenAI or Gemini) is off by default and advisory: the rules still decide what runs, the verdict and the exit code. In the action, ranking is a later step that runs only after Playwright has exited, and only when the workflow sets `llm: true`. See LLM Ranking (Optional) and [docs/release-acceptance.md](docs/release-acceptance.md).
 
 ## Requirements
 
@@ -967,7 +967,7 @@ The action ranks in its own step, after Playwright has exited. Call caps stay th
 - Opt in from a workflow that pins a trusted tag, not `uses: ./`. This repo's `.github/workflows/prcheck.yml` does not set `llm` and does not pass a secret, because `uses: ./` lets the pull request change the action and read a secret passed into it. Forks still receive no secrets.
 
 ```yaml
-- uses: sprintsynergyio/qa-core-prcheck@<trusted-tag>
+- uses: sprintsynergyio/qa-core-prcheck@v0.2.0
   with:
     llm: true
     llm-api-key: ${{ secrets.PRCHECK_LLM_API_KEY }}
@@ -1300,8 +1300,9 @@ Not confirmed and not live checked: the `<app-slug>[bot]` login and `Bot` type o
 - PR 7b: raw URLs in the summary text (done)
 - PR 8: optional LLM ranking, advisory and off by default (done)
 - v0.1.0: release prep, npm package `@sprintsynergy/qa-core-prcheck` (done)
-- PR 9: safety and cost guards (in this tree, not yet published): config size and count limits, a kill timeout capped at 30 minutes, `rank` after Playwright, and an action that keeps the API key out of the Playwright step unless a workflow sets `llm: true`. The opt-in `--forbid-only` once planned here is not a flag: PR 6a passes it on every run
-- PR 10: eval fixtures and docs (not in this tree; the unit fixtures under `tests/fixtures/` stay the regression suite)
+- v0.2.0: released 2026-11-09, npm and GitHub Release (done)
+- PR 9: safety and cost guards (released in v0.2.0): config size and count limits, a kill timeout capped at 30 minutes, `rank` after Playwright, and an action that keeps the API key out of the Playwright step unless a workflow sets `llm: true`. The opt-in `--forbid-only` once planned here is not a flag: PR 6a passes it on every run
+- PR 10: eval fixtures and docs (released in v0.2.0 as `npm run eval`; the unit fixtures under `tests/fixtures/` stay the regression suite)
 
 ## License
 

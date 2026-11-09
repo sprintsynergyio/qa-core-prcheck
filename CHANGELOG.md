@@ -2,7 +2,7 @@
 
 ## 0.2.0 (2026-11-09)
 
-Safety and cost guards, a rule eval, and Windows and macOS CLI coverage, on top of 0.1.0. This version is in the repository and is not published. The owner tags and publishes.
+Safety and cost guards, a rule eval, and Windows and macOS CLI coverage, on top of 0.1.0. Published on npm as `@sprintsynergy/qa-core-prcheck@0.2.0` and tagged `v0.2.0`.
 
 - Config limits: `qa-core-prcheck.config.json` is refused over 65536 bytes. `playwrightDir` is at most 200 characters. `areas` has at most 100 globs and 20 tags each. A tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs of at most 300 characters. Control characters are refused. The pull request config still cannot name the API key env var or the kill timeout.
 - `--timeout-minutes` on `run` and `check`, and the action input `timeout-minutes`: a whole number from 1 to 30, default 30. Outside that range is exit 2 and no test starts.

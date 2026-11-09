@@ -1,6 +1,6 @@
 # Release acceptance
 
-Checklist for version 0.2.0 in this tree. The npm registry still has 0.1.0 until the owner publishes. This file is not a claim that a pull request is safe to merge.
+Checklist for version 0.2.0, released on 2026-11-09 (npm `@sprintsynergy/qa-core-prcheck@0.2.0`, tag `v0.2.0`). This file is not a claim that a pull request is safe to merge.
 
 Product rules that stay in force:
 
@@ -37,7 +37,7 @@ Visual checks, and which of them block a merge:
 - [x] CLI CI is scheduled on Linux, Windows, and macOS. Record the run URLs on the pull request after they finish.
 - [x] Fork comment guards are executed locally: same-repo versus fork, null head, case mismatch, and Dependabot. The live fork end-to-end path is unexercised and is not a merge blocker.
 - [ ] Optional follow-up, not a merge blocker: glance at one job summary, and only if wanted, a throwaway pull request for the live escape titles above.
-- [ ] After merge, the owner pins a trusted tag before setting `llm: true` with a real key, then tags `v0.2.0` and publishes. This tree does not do those steps.
+- [x] Tagged `v0.2.0` at `16eaee6` and published to npm on 2026-11-09. A workflow that sets `llm: true` with a real key pins `sprintsynergyio/qa-core-prcheck@v0.2.0`.
 
 ## Still out of scope
 
