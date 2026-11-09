@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { PASSWORD } from '../fixtures/users';
 
+// E2E proof, second push: a harmless comment so the sticky comment must be updated in place.
 export class LoginPage {
   readonly page: Page;
   readonly username: Locator;
