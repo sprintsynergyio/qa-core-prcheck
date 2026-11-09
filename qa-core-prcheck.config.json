@@ -1,0 +1,4 @@
+{
+  "playwrightDir": "demo/saucedemo",
+  "ignore": [".github/workflows/**", "qa-core-prcheck.config.json"]
+}

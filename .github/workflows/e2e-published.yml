@@ -1,0 +1,58 @@
+# E2E proof only, do not merge. Runs the published action tag, not ./, against the demo suite.
+# It mirrors prcheck.yml. The tag has no dist/, so the action's first step builds its own CLI,
+# which is the path another repo takes. Close the pull request after review.
+name: E2E Published Action
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: e2e-published-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-published:
+    name: Run sprintsynergyio/qa-core-prcheck@v0.2.0
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # The demo suite's own @playwright/test. No npm run build: the published action builds itself.
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run the published qa-core-prcheck action
+        id: prcheck
+        uses: sprintsynergyio/qa-core-prcheck@v0.2.0
+        with:
+          comment: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+      - name: Print the action outputs
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.prcheck.outputs.exit-code }}
+          VERDICT: ${{ steps.prcheck.outputs.verdict }}
+          LLM_STATUS: ${{ steps.prcheck.outputs.llm-status }}
+        run: |
+          echo "exit-code=$EXIT_CODE verdict=$VERDICT llm-status=$LLM_STATUS"
+      - name: Upload the check files
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: prcheck-e2e-published
+          path: |
+            prcheck-summary.md
+            prcheck-selection.json
+            prcheck-results.json
+            demo/saucedemo/test-results/
+          if-no-files-found: warn
+          retention-days: 7

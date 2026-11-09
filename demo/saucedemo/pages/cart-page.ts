@@ -21,6 +21,7 @@ export class CartPage {
     await expect(this.checkoutButton).toBeVisible();
   }
 
+  // E2E proof: a harmless comment so the diff touches a Page Object that specs import.
   async checkout() {
     await this.waitForLoaded();
     await this.checkoutButton.click();
