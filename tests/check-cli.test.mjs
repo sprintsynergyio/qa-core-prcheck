@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cleanup, createTempRepo, gitEnv } from './helpers/git-repo.mjs';
 
 /**
@@ -46,6 +46,7 @@ Commands:
   select          Pick the Playwright specs a change can affect (does not run them)
   run             Run the picked Playwright specs and report the results
   check           Pick, run and summarize: writes the Markdown summary for the PR
+  rank            Apply optional LLM ranking to a summary that check already wrote
   comment         Post or update the sticky PR comment from a summary file
 
 Options:
@@ -55,8 +56,8 @@ Options:
 Run qa-core-prcheck <command> --help for the command options.
 `;
 
-const CHECK_USAGE = `qa-core-prcheck check --base <ref> [--head <ref>] [--root <dir>] [--summary-file <path>] [--json] [--dry-run]
-qa-core-prcheck check --diff-file <path> [--root <dir>] [--summary-file <path>] [--json] [--dry-run]
+const CHECK_USAGE = `qa-core-prcheck check --base <ref> [--head <ref>] [--root <dir>] [--summary-file <path>] [--json] [--dry-run] [--skip-llm]
+qa-core-prcheck check --diff-file <path> [--root <dir>] [--summary-file <path>] [--json] [--dry-run] [--skip-llm]
 
 Picks the Playwright specs a change can affect, runs them and writes one Markdown summary.
 
@@ -66,12 +67,15 @@ Options:
   --diff-file <path>     Read a saved unified git diff instead of running git
   --root <dir>           The repository root (default: the current folder)
   --summary-file <path>  Where to write the summary (default: prcheck-summary.md)
+  --timeout-minutes <n>  Kill timeout for Playwright, a whole number from 1 to 30 (default: 30)
   --json                 Print JSON instead of the Markdown summary
   --dry-run              Build the command and summary without running tests or writing files
+  --skip-llm             Do not rank. The action uses this so the API key stays out of Playwright
   -h, --help             Print this help
 
 Also appends the summary to $GITHUB_STEP_SUMMARY when it is set.
-Reads "llm" from qa-core-prcheck.config.json for optional advisory LLM ranking (off by default; key from the env var it names).
+Reads "llm" from qa-core-prcheck.config.json for optional advisory LLM ranking (off by default).
+The API key is read only from the env var PRCHECK_LLM_API_KEY. --skip-llm makes no ranking call.
 Exit codes: 0 all picked tests passed or nothing to run, 1 a picked test failed, 2 usage or tool error.
 `;
 const HELP_LINE = 'Run qa-core-prcheck check --help for usage.\n';
@@ -138,6 +142,10 @@ const USAGE_ERRORS = [
   [['check', '--dry-run', '--dry-run', '--base', 'main'], 'Duplicate argument: --dry-run'],
   [['check', '--base', 'main', '--diff-file', 'x.diff'], 'Use either --base or --diff-file, not both'],
   [['check', '--diff-file', 'x.diff', '--head', 'main'], '--head can only be used with --base'],
+  [['check', '--timeout-minutes'], 'Missing value for --timeout-minutes'],
+  [['check', '--timeout-minutes', '0', '--diff-file', 'x.diff'], '--timeout-minutes must be a whole number of minutes from 1 to 30'],
+  [['check', '--timeout-minutes', '90', '--diff-file', 'x.diff'], '--timeout-minutes must be a whole number of minutes from 1 to 30'],
+  [['check', '--skip-llm', '--skip-llm', '--diff-file', 'x.diff'], 'Duplicate argument: --skip-llm'],
 ];
 
 for (const [args, message] of USAGE_ERRORS) {
@@ -381,7 +389,7 @@ test('check: provider set but key unset: stdout and files byte-identical to no l
   const plainRoot = llmRoot(t);
   const llmRootDir = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
-  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record };
+  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record };
   const plainCwd = newDir(t);
   const llmCwd = newDir(t);
   const plain = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', plainRoot.dir], { cwd: plainCwd, env });
@@ -415,7 +423,7 @@ test('check: an llm config that names apiKeyEnv exits 2 before any Playwright ca
   const root = llmRoot(t, { llm: { provider: 'openai', model: 'example-model', apiKeyEnv: 'GITHUB_TOKEN' } });
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY,
   };
   const r = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir], { cwd: newDir(t), env });
@@ -431,7 +439,7 @@ test('check: a dry run with the key set makes no fetch, and the inventory child 
   const root = llmRoot(t, { llm: { provider: 'openai', model: 'example-model' } });
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
   };
   const cwd = newDir(t);
@@ -444,11 +452,30 @@ test('check: a dry run with the key set makes no fetch, and the inventory child 
   assert.deepEqual(fs.readdirSync(cwd), []);
 });
 
+test('check --skip-llm with a provider and a key makes no fetch and prints no off line', LIVE, async (t) => {
+  const plainRoot = llmRoot(t);
+  const root = llmRoot(t, LLM_CONFIG);
+  const record = path.join(newDir(t), 'fetch.txt');
+  const env = {
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
+    PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
+  };
+  const skipped = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir, '--skip-llm'], { cwd: newDir(t), env });
+  const plain = await runCli(
+    ['check', '--diff-file', diffFile('modify.diff'), '--root', plainRoot.dir, '--skip-llm'],
+    { cwd: newDir(t), env: withoutHostKeys(process.env) },
+  );
+  assert.deepEqual([skipped.status, skipped.stderr], [0, '']);
+  assert.equal(skipped.stdout, plain.stdout);
+  assert.equal(fs.existsSync(record), false, 'no fetch');
+  assert.ok(root.calls().every((call) => call.keys.length === 0));
+});
+
 test('check: a dry run with a provider set and the key unset prints no off line, with or without --json', LIVE, async (t) => {
   const plainRoot = llmRoot(t);
   const root = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
-  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: '' };
+  const env = { ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record, PRCHECK_LLM_API_KEY: '' };
   const cwd = newDir(t);
   for (const extra of [[], ['--json']]) {
     const r = await runCli(['check', '--diff-file', diffFile('modify.diff'), '--root', root.dir, '--dry-run', ...extra], { cwd, env });
@@ -464,7 +491,7 @@ test('check: a failed request is a skipped ranking: exit 0, the stderr line, and
   const root = llmRoot(t, LLM_CONFIG);
   const record = path.join(newDir(t), 'fetch.txt');
   const env = {
-    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${noNetwork}`, PRCHECK_TEST_FETCH_RECORD: record,
+    ...withoutHostKeys(process.env), NODE_OPTIONS: `--import=${pathToFileURL(noNetwork).href}`, PRCHECK_TEST_FETCH_RECORD: record,
     PRCHECK_LLM_API_KEY: FAKE_KEY, GITHUB_ACTIONS: 'true',
   };
   const skipped = 'LLM ranking skipped: the provider could not be reached: ENETUNREACH (2 attempts). The deterministic order is used.';

@@ -1,6 +1,6 @@
 {
   "name": "@sprintsynergy/qa-core-prcheck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CI PR check agent: reads a pull request diff, picks the related Playwright tests, runs them and posts a pass or fail summary.",
   "keywords": [
     "playwright",
@@ -13,13 +13,13 @@
     "testing",
     "cli"
   ],
-  "homepage": "https://github.com/sprintsynergyhq/qa-core-prcheck#readme",
+  "homepage": "https://github.com/sprintsynergyio/qa-core-prcheck#readme",
   "bugs": {
-    "url": "https://github.com/sprintsynergyhq/qa-core-prcheck/issues"
+    "url": "https://github.com/sprintsynergyio/qa-core-prcheck/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sprintsynergyhq/qa-core-prcheck.git"
+    "url": "git+https://github.com/sprintsynergyio/qa-core-prcheck.git"
   },
   "license": "MIT",
   "author": {
@@ -39,7 +39,8 @@
     "dist/",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/release-acceptance.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -48,7 +49,9 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --test \"tests/*.test.mjs\"",
+    "eval": "npm run build && node evals/run.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "demo:list": "playwright test -c demo/saucedemo/playwright.config.ts --list",
     "demo:test": "playwright test -c demo/saucedemo/playwright.config.ts"
   },

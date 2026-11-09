@@ -1,6 +1,8 @@
 # Runs qa-core-prcheck on every pull request of this repo, with the action in this repo.
 # The pull_request event only, so a fork's code never runs with a write token.
 # Event values never go into with: or run:; the only expression in with: is a boolean.
+# Linux only. The action's steps are bash, and Playwright 1.60.0 installs Chromium here.
+# Windows and macOS coverage of the CLI is the CI workflow, not this job.
 name: PR Check
 
 on:
@@ -18,7 +20,10 @@ concurrency:
 jobs:
   prcheck:
     name: Pick, run and summarize the Playwright tests
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26
+    # image that ubuntu-latest provides (seen on 2026-11-08: "Playwright does not support chromium
+    # on ubuntu26.04-x64"). The unit-test workflow stays on ubuntu-latest; it does not install a browser.
+    runs-on: ubuntu-24.04
     steps:
       # Full history, so the merge base with origin/<base branch> is there. check only runs local git.
       - uses: actions/checkout@v7

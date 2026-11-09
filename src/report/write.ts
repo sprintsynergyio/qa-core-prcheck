@@ -5,8 +5,8 @@ import { formatRunJson, type RunResult } from '../run/index.js';
 import { ReportError } from './types.js';
 
 // Written beside the summary file: the same JSON as select --json and run --json.
-const SELECTION_FILE = 'prcheck-selection.json';
-const RESULTS_FILE = 'prcheck-results.json';
+export const SELECTION_FILE = 'prcheck-selection.json';
+export const RESULTS_FILE = 'prcheck-results.json';
 
 export interface WrittenFiles {
   summaryFile: string;   // as shown: relative to the current folder, or the file name only

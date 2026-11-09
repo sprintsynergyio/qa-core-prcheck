@@ -1,3 +1,6 @@
+# Typecheck, unit tests, the rule eval, and a packed-CLI smoke test.
+# The CLI is what this job covers on each OS. It does not install a browser and it does not call
+# SauceDemo. The GitHub Action itself stays on the Linux pull request workflow.
 name: CI
 
 on:
@@ -10,14 +13,20 @@ permissions:
 
 jobs:
   test:
-    name: Typecheck and unit tests
-    runs-on: ubuntu-latest
+    name: Typecheck and unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run eval
+      - run: npm run pack:smoke

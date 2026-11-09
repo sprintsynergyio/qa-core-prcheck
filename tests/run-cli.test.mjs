@@ -26,6 +26,7 @@ Commands:
   select          Pick the Playwright specs a change can affect (does not run them)
   run             Run the picked Playwright specs and report the results
   check           Pick, run and summarize: writes the Markdown summary for the PR
+  rank            Apply optional LLM ranking to a summary that check already wrote
   comment         Post or update the sticky PR comment from a summary file
 
 Options:
@@ -41,13 +42,14 @@ qa-core-prcheck run --diff-file <path> [--root <dir>] [--json] [--dry-run]
 Picks the Playwright specs a change can affect, runs them and reports the results.
 
 Options:
-  --base <ref>        Compare against the merge base of this ref and the head
-  --head <ref>        The head ref (default: HEAD)
-  --diff-file <path>  Read a saved unified git diff instead of running git
-  --root <dir>        The repository root (default: the current folder)
-  --json              Print JSON instead of text
-  --dry-run           Print the Playwright command without running it
-  -h, --help          Print this help
+  --base <ref>           Compare against the merge base of this ref and the head
+  --head <ref>           The head ref (default: HEAD)
+  --diff-file <path>     Read a saved unified git diff instead of running git
+  --root <dir>           The repository root (default: the current folder)
+  --timeout-minutes <n>  Kill timeout for Playwright, a whole number from 1 to 30 (default: 30)
+  --json                 Print JSON instead of text
+  --dry-run              Print the Playwright command without running it
+  -h, --help             Print this help
 
 Exit codes: 0 all picked tests passed or nothing to run, 1 a picked test failed, 2 usage or tool error.
 `;
@@ -118,6 +120,11 @@ const USAGE_ERRORS = [
   [['run', '--base', 'main', '--diff-file', 'x.diff'], 'Use either --base or --diff-file, not both'],
   [['run', '--diff-file', 'x.diff', '--head', 'main'], '--head can only be used with --base'],
   [['run', '--head', 'main', '--dry-run'], '--head can only be used with --base'],
+  [['run', '--timeout-minutes'], 'Missing value for --timeout-minutes'],
+  [['run', '--timeout-minutes', '0', '--diff-file', 'x.diff'], '--timeout-minutes must be a whole number of minutes from 1 to 30'],
+  [['run', '--timeout-minutes', '31', '--diff-file', 'x.diff'], '--timeout-minutes must be a whole number of minutes from 1 to 30'],
+  [['run', '--timeout-minutes', '08', '--diff-file', 'x.diff'], '--timeout-minutes must be a whole number of minutes from 1 to 30'],
+  [['run', '--timeout-minutes', '30', '--timeout-minutes', '1', '--diff-file', 'x.diff'], 'Duplicate argument: --timeout-minutes'],
 ];
 
 for (const [args, message] of USAGE_ERRORS) {

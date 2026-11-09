@@ -8,8 +8,11 @@ import { buildPlaywrightArgs } from './command.js';
 import { cleanErrorLine, parseJsonReport } from './parse.js';
 import { RunError, type RunCounts, type RunResult, type RunVerdict, type TestResult } from './types.js';
 
-// How long one Playwright run may take before it is stopped. A chosen limit; PR 9 makes it configurable.
-const KILL_TIMEOUT_MS = 30 * 60 * 1000;
+// How long one Playwright run may take before it is stopped. The CLI and the action accept 1 to 30
+// minutes and pass the result here. The pull request config cannot set it. Callers of runSelected
+// (tests) may pass a shorter timeoutMs; they cannot raise the CLI past this cap.
+export const DEFAULT_KILL_TIMEOUT_MS = 30 * 60 * 1000;
+const KILL_TIMEOUT_MS = DEFAULT_KILL_TIMEOUT_MS;
 const TEMP_PREFIX = 'prcheck-run-';
 const REPORT_NAME = 'report.json';
 const NO_TESTS_RAN = 'No tests ran for the selected specs';

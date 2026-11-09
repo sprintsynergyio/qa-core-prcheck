@@ -26,7 +26,7 @@
 // - Playwright gives status skipped to a test whose results are all interrupted, so the last result
 //   decides interrupted below.
 
-import path from 'node:path';
+import { relativeRepoPath, resolveRepoPath, toForwardSlashes } from '../paths.js';
 import { describeTitles, testTitle } from '../inventory/list.js';
 import { RunError, type TestResult, type TestStatus } from './types.js';
 
@@ -51,9 +51,19 @@ function notAReport(): never {
   throw new RunError(NOT_A_REPORT);
 }
 
-/** The first non-empty line, with color codes removed and the root taken out of paths. Not cut. */
+/**
+ * The first non-empty line, with color codes removed and the root taken out of paths. Not cut.
+ * Playwright and git may use either slash. A Windows root is removed from both forms, and a
+ * backslash that remains in the line becomes /, so the summary does not depend on the OS.
+ */
 function cleanFirstLine(text: string, root: string): string {
-  const clean = text.replace(ANSI, '').split(root + path.sep).join('');
+  let clean = text.replace(ANSI, '');
+  const forms = new Set([toForwardSlashes(root), root]);
+  for (const form of forms) {
+    if (form === '') continue;
+    clean = clean.split(`${form}/`).join('').split(`${form}\\`).join('');
+  }
+  clean = clean.replaceAll('\\', '/');
   return clean.split('\n').map((line) => line.trim()).find((line) => line !== '') ?? '';
 }
 
@@ -68,9 +78,7 @@ export function cleanErrorLine(text: string, root: string): string {
 
 /** The repo-relative POSIX path of file, or null when it is not inside root. */
 function insideRoot(root: string, file: string): string | null {
-  const relative = path.relative(root, path.resolve(root, file)).split(path.sep).join('/');
-  if (relative === '' || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) return null;
-  return relative;
+  return relativeRepoPath(root, file);
 }
 
 function messageOf(error: unknown): string | null {
@@ -132,7 +140,7 @@ function readSpec(spec: unknown, titles: string[], context: Context): void {
   if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) notAReport();
   if (!Array.isArray(tests)) notAReport();
 
-  const relative = insideRoot(context.root, path.resolve(context.rootDir, file));
+  const relative = insideRoot(context.root, resolveRepoPath(context.rootDir, file));
   if (relative === null) throw new RunError(`Test file outside the root folder: ${file}`);
   const fullTitle = testTitle(titles, title);
   const sortedTags = [...new Set((tags as string[]).map((tag) => (tag.startsWith('@') ? tag : `@${tag}`)))].sort(compareText);

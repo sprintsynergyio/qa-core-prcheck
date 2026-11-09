@@ -179,6 +179,43 @@ for (const [label, content, message] of LLM_BAD) {
   });
 }
 
+test('limits: a glob with more than 8 stars is rejected', (t) => {
+  throwsImpactError(withConfig(t, { ignore: ['**/**/**/**/*'] }), '"ignore" glob has more than 8 * characters');
+  assert.equal(loadConfig(withConfig(t, { ignore: ['**/**/**/**'] })).ignore[0], '**/**/**/**');
+});
+
+test('a symlink config is rejected', (t) => {
+  const dir = newDir(t);
+  const target = path.join(dir, 'real.json');
+  fs.writeFileSync(target, '{"playwrightDir":"."}');
+  try {
+    fs.symlinkSync(target, path.join(dir, 'qa-core-prcheck.config.json'));
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') return;
+    throw error;
+  }
+  throwsImpactError(dir, 'the file must be a regular file, not a symlink');
+});
+
+test('limits: too many areas, tags, globs, a long tag, a control character and a huge file are rejected', (t) => {
+  const areas = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`src/${i}.ts`, ['@cart']]));
+  throwsImpactError(withConfig(t, { areas }), '"areas" has more than 100 globs');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': Array.from({ length: 21 }, (_, i) => `@t${i}`) } }),
+    '"areas" value for "src/**" has more than 20 tags');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': ['@'] } }),
+    '"areas" tag for "src/**" must be @ followed by 1 to 63 characters and no whitespace');
+  throwsImpactError(withConfig(t, { areas: { 'src/**': [`@${'a'.repeat(64)}`] } }),
+    '"areas" tag for "src/**" must be @ followed by 1 to 63 characters and no whitespace');
+  throwsImpactError(withConfig(t, { ignore: ['docs/**\nsecret'] }), '"ignore" glob must not contain control characters');
+  throwsImpactError(withConfig(t, { fullSuiteOn: ['x'.repeat(301)] }), '"fullSuiteOn" glob is longer than 300 characters');
+  throwsImpactError(withConfig(t, { ignore: Array.from({ length: 101 }, (_, i) => `f${i}.md`) }),
+    '"ignore" has more than 100 globs');
+  throwsImpactError(withConfig(t, { playwrightDir: 'd'.repeat(201) }),
+    '"playwrightDir" must be at most 200 characters and must not contain control characters');
+  const huge = withConfig(t, `{${' '.repeat(70_000)}"playwrightDir":"."}`);
+  throwsImpactError(huge, 'the file is larger than 65536 bytes');
+});
+
 test('llm: loadLlmConfig keeps the file errors of loadConfig', (t) => {
   assert.throws(() => loadLlmConfig(withConfig(t, '{')), (e) => e instanceof ImpactError && e.message.startsWith('qa-core-prcheck.config.json is not valid JSON: '));
   assert.throws(() => loadLlmConfig(withConfig(t, '[]')), (e) => e.message === 'qa-core-prcheck.config.json: the top level must be a JSON object');

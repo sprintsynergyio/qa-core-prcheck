@@ -37,7 +37,8 @@ function newDir(t) {
 function reportCopy(t, name) {
   const text = fs.readFileSync(path.join(repoRoot, 'tests', 'fixtures', 'results', name), 'utf8');
   const file = path.join(newDir(t), name);
-  fs.writeFileSync(file, text.split('"/repo/').join(`"${repoRoot}/`).split('"/project/').join(`"${repoRoot}/`));
+  const slashRoot = repoRoot.replaceAll('\\', '/');
+  fs.writeFileSync(file, text.split('"/repo/').join(`"${slashRoot}/`).split('"/project/').join(`"${slashRoot}/`));
   return file;
 }
 
@@ -160,6 +161,7 @@ test('an error before the run is thrown, and checkErrorLine shows the absolute r
 test('checkErrorLine keeps the first line, removes color codes and makes paths in the root relative', () => {
   const root = '/work/shop';
   assert.equal(checkErrorLine('\u001b[31mError: /work/shop/demo/a.spec.ts failed\u001b[39m\nsecond line', root), 'Error: demo/a.spec.ts failed');
+  assert.equal(checkErrorLine('Error: C:\\work\\shop\\demo\\a.spec.ts failed', 'C:\\work\\shop'), 'Error: demo/a.spec.ts failed');
   assert.equal(checkErrorLine('Unknown ref: nope. Fetch it first, for example git fetch origin <branch>', root), 'Unknown ref: nope. Fetch it first, for example git fetch origin <branch>');
 });
 

@@ -200,6 +200,34 @@ test('rank: the fake key echoed by the provider is in no reason, note or message
   }
 });
 
+test('rank: a key with a line break or over the length cap is not sent', async () => {
+  const { fetch, calls } = noFetch();
+  const broken = await rankWithLlm({
+    config: CONFIG, env: { PRCHECK_LLM_API_KEY: `${FAKE_KEY}\nnext` }, diff: DIFF, ...ranInput(), fetch,
+  });
+  assert.deepEqual(broken, {
+    status: 'skipped', provider: 'anthropic', model: 'example-model', reason: 'the API key is not a single printable token',
+  });
+  const long = await rankWithLlm({
+    config: CONFIG, env: { PRCHECK_LLM_API_KEY: 'k'.repeat(4097) }, diff: DIFF, ...ranInput(), fetch,
+  });
+  assert.equal(long.status, 'skipped');
+  assert.equal(long.reason, 'the API key is longer than 4096 characters');
+  assert.ok(!long.reason.includes('k'.repeat(20)));
+  assert.deepEqual(calls, []);
+});
+
+test('rank: the request body does not contain the API key when a reason repeats it', async () => {
+  const input = ranInput();
+  input.selection.selected = input.selection.selected.map((spec) => ({ ...spec, reasons: [`saw ${FAKE_KEY}`] }));
+  const { ranking, calls } = await rank([reply(200, withText('anthropic.json', GOOD))], { input });
+  assert.equal(ranking.status, 'applied');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].headers.authorization.includes(FAKE_KEY));
+  assert.ok(!calls[0].body.includes(FAKE_KEY));
+  assert.ok(calls[0].body.includes('saw ***'));
+});
+
 test('prompt: a marker string in a temp page object body is in no request body', async (t) => {
   const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'prcheck-'));
   t.after(() => cleanup(dir));

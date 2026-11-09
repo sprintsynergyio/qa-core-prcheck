@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { DiffResult } from '../diff/index.js';
 import { loadLlmConfig, selectTests, type Selection } from '../impact/index.js';
 import { DEFAULT_API_KEY_ENV, llmOffLine, rankWithLlm, type FetchLike, type LlmConfig, type Ranking, type SleepLike } from '../llm/index.js';
@@ -13,6 +12,7 @@ export interface CheckOptions {
   playwrightCli?: string;        // for tests only: replaces the CLI found from root for the test run
   timeoutMs?: number;            // the kill timeout of the test run
   version: string;               // the tool version for the summary footer
+  skipLlm?: boolean;             // pick and run, but do not rank. The action sets this so the key stays out of Playwright
   llmConfig?: LlmConfig;         // for tests only: replaces the "llm" config read from root
   fetch?: FetchLike;             // for tests only: replaces the built-in fetch of the LLM step
   sleep?: SleepLike;             // for tests only: replaces the wait before an LLM retry
@@ -34,17 +34,21 @@ export interface CheckResult {
  * the ranking is a separate input to the summary, and any LLM failure is a skipped ranking.
  */
 export async function runCheck(options: CheckOptions): Promise<CheckResult> {
-  const { root, diff, env, version, llmConfig, fetch, sleep, ...run } = options;
+  const { root, diff, env, version, llmConfig, fetch, sleep, skipLlm, ...run } = options;
   const config = llmConfig ?? loadLlmConfig(root);
   const fullEnv = { ...process.env, ...env };
   // The key never reaches Playwright: its env var is taken out of the env of both Playwright runs.
+  // Removing it does not hide a key that is already in this process. The action therefore runs check
+  // with skipLlm and without the key, and ranks in a later process.
   const removeEnv = [DEFAULT_API_KEY_ENV];
   const selection = await selectTests({ root, diff, env, removeEnv });
   const result = await runSelection({ ...run, root, env, removeEnv, selection });
-  const llm = run.dryRun === true ? null : await rankWithLlm({ config, env: fullEnv, diff, selection, result, fetch, sleep });
+  const holdLlm = skipLlm === true || run.dryRun === true;
+  const llm = holdLlm ? null : await rankWithLlm({ config, env: fullEnv, diff, selection, result, fetch, sleep });
   const summary = formatSummary({ selection, result, error: null, version, ranking: llm });
-  // A dry run never ranks, so it prints no off line either (PR 8 review).
-  const llmOff = run.dryRun === true ? null : llmOffLine(config, fullEnv);
+  // A dry run never ranks, so it prints no off line either (PR 8 review). --skip-llm is the same:
+  // ranking has not been attempted, and a later rank command owns the off or skipped line.
+  const llmOff = holdLlm ? null : llmOffLine(config, fullEnv);
   return { selection, result, summary, llm, llmOff };
 }
 
@@ -54,5 +58,7 @@ export async function runCheck(options: CheckOptions): Promise<CheckResult> {
  */
 export function checkErrorLine(message: string, root: string): string {
   const line = cleanErrorLine(message, root);
-  return root === path.parse(root).root ? line : line.split(root).join('<root>');
+  const slashRoot = root.replaceAll('\\', '/');
+  if (slashRoot === '/' || slashRoot === '') return line;
+  return line.split(slashRoot).join('<root>');
 }

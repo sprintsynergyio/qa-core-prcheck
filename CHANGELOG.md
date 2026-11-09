@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0 (2026-11-09)
+
+Safety and cost guards, a rule eval, and Windows and macOS CLI coverage, on top of 0.1.0. This version is in the repository and is not published. The owner tags and publishes.
+
+- Config limits: `qa-core-prcheck.config.json` is refused over 65536 bytes. `playwrightDir` is at most 200 characters. `areas` has at most 100 globs and 20 tags each. A tag is `@` plus 1 to 63 characters and no whitespace. `fullSuiteOn` and `ignore` have at most 100 globs of at most 300 characters. Control characters are refused. The pull request config still cannot name the API key env var or the kill timeout.
+- `--timeout-minutes` on `run` and `check`, and the action input `timeout-minutes`: a whole number from 1 to 30, default 30. Outside that range is exit 2 and no test starts.
+- `rank` command: applies the optional LLM ranking to the summary `check` already wrote. It does not run Playwright. It rewrites the summary only when a ranking is applied or skipped, and it appends the summary to `$GITHUB_STEP_SUMMARY`.
+- `check --skip-llm`: pick and run, and do not rank. The action sets this and unsets `PRCHECK_LLM_API_KEY` before Node starts, so the key is not in the process that runs pull request tests.
+- Action inputs `llm` (default `false`) and `llm-api-key`. The key is passed only to the rank step, and only when `llm` is `true`. A skipped ranking prints a `::warning::` from `llm.status`. Output `llm-status`. A key with a line break, `%`, or more than 4096 characters is not sent. The request body is scrubbed of the key. At most two HTTP attempts, unchanged, and the config cannot raise them.
+- This repo's pull request workflow does not set `llm` and does not pass a secret, because it uses `uses: ./`.
+- `ci.yml` uses `actions/checkout@v7` and `actions/setup-node@v7`, the same majors as `prcheck.yml`.
+- The pull request workflow runs on `ubuntu-24.04` and is Linux-only. Playwright 1.60.0 cannot install Chromium on the Ubuntu 26 image behind `ubuntu-latest` (seen 2026-11-08).
+- CI runs typecheck, unit tests, `npm run eval`, and `npm run pack:smoke` on `ubuntu-latest`, `windows-latest`, and `macos-latest`. Those jobs do not install a browser and do not call SauceDemo.
+- Windows: error lines drop a root written with either slash and then use forward slashes. A POSIX root such as `/repo` is resolved without prefixing the current drive. Test git repos use an empty config file, because Git for Windows cannot use `NUL` as `GIT_CONFIG_GLOBAL`. `--import` in the tests uses a `file:` URL. Recorded reports are rewritten with forward slashes so the JSON stays valid.
+- Review fixes: the check and rank steps unset `GITHUB_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, and `NODE_AUTH_TOKEN` before Node starts. The comment step still receives its token. A config symlink is refused. A glob with more than 8 `*` characters is refused. `rank` refuses a summary over 60000 bytes, a summary that does not start with the marker, a summary line that is a workflow command, a symlink, and a selection or result JSON that is not the shape `check` writes. JSON reads are capped at 2 MiB.
+- `npm run eval` checks saved diffs against the demo tree: a mapped page, docs-only and empty diffs, an unimported page, a full-suite trigger, a rename against the current checkout, paths with spaces, a rejected timeout, the mention and autolink escapes, and the comment guards for a same-repo pull request, a fork, a null head repository, and Dependabot. The result is pass or fail per case. It is not a model score.
+- Package links point at `github.com/sprintsynergyio/qa-core-prcheck`.
+- `docs/release-acceptance.md`: gap matrix, comment-rendering evidence, and the release checklist.
+
 ## 0.1.0 (2026-11-03)
 
 First public release, as the npm package `@sprintsynergy/qa-core-prcheck`. It holds everything merged to main up to and including PR 8.

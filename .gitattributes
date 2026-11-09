@@ -1,2 +1,4 @@
+# Check out text as LF on every platform, so golden files and workflow scripts match.
+* text=auto eol=lf
 # Saved git diff fixtures: keep the exact bytes git wrote, on every platform.
 tests/fixtures/diffs/*.diff -text
