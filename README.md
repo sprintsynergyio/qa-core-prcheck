@@ -1,6 +1,69 @@
-# qa-core-prcheck
+<h1 align="center">qa-core-prcheck</h1>
+
+<p align="center">
+  <strong>Run the Playwright tests a pull request can affect, and only those.</strong><br/>
+  <strong>Diff • Select • Run • Check • Comment</strong><br/>
+  <sub>A CLI and GitHub Action that reads a PR diff, picks the affected specs with a written reason for each, runs them, suggests missing tests and posts one sticky pass or fail summary.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sprintsynergyio/qa-core-prcheck/actions/workflows/ci.yml"><img src="https://github.com/sprintsynergyio/qa-core-prcheck/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/@sprintsynergy/qa-core-prcheck"><img src="https://img.shields.io/npm/v/%40sprintsynergy%2Fqa-core-prcheck.svg" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@sprintsynergy/qa-core-prcheck"><img src="https://img.shields.io/npm/dm/%40sprintsynergy%2Fqa-core-prcheck.svg" alt="npm downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22.6-339933?logo=node.js&logoColor=white" alt="Node 22.6 or newer" />
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> · <a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="#diff-command">Commands</a> · <a href="#github-action">GitHub Action</a> · <a href="#configuration">Configuration</a> · <a href="https://www.npmjs.com/package/@sprintsynergy/qa-core-prcheck">npm</a>
+</p>
+
+---
 
 A CI agent for GitHub Actions that reads a pull request diff, picks the Playwright tests the change can affect, runs only those, suggests missing tests and posts one pass or fail summary before merge.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### Picks with reasons
+
+Rules map changed files to specs through imports, tags and your config. Every pick carries a written reason, and CI, lockfile or config changes run the full suite.
+
+</td>
+<td width="33%" valign="top">
+
+### One summary per PR
+
+`check` runs only the picked specs and writes one Markdown summary: passed, failed or error, with a table per spec and suggested missing tests. The action keeps it in one sticky PR comment.
+
+</td>
+<td width="33%" valign="top">
+
+### Advisory and safe
+
+Advisory by default. Playwright always runs with `--forbid-only`. Optional LLM ranking is off by default, runs after Playwright has exited, and never changes what runs, the verdict or the exit code.
+
+</td>
+</tr>
+</table>
+
+<!-- A screenshot of the sticky PR comment from a real pull request in this repo would help here. Capture a real run; do not use a generated image. -->
+
+---
+
+## Quick Start
+
+In the repository that holds your Playwright tests (Node 22.6 or later, `@playwright/test` 1.60.0 or later):
+
+```bash
+npm install --save-dev @sprintsynergy/qa-core-prcheck@0.2.1
+echo '{ "playwrightDir": "." }' > qa-core-prcheck.config.json
+npx qa-core-prcheck select --base origin/main    # which specs the branch can affect, and why
+npx qa-core-prcheck check --base origin/main     # pick, run and summarize
+```
+
+Set `playwrightDir` to the folder with your `playwright.config.ts`. On pull requests, use the action: see [Use From Another Repository](#use-from-another-repository). The full install notes are in [Install](#install).
 
 ## Status
 
@@ -38,42 +101,36 @@ npx qa-core-prcheck check --base origin/main   # pick, run and summarize the tes
 
 The command is `qa-core-prcheck` (no scope). Every `node dist/cli.js` example below works the same as `npx qa-core-prcheck` once the package is installed.
 
-## Quick Start
+---
 
-To work on this repo itself:
+## Features
 
-```bash
-npm ci                            # install pinned dependencies
-npx playwright install chromium   # browser for the demo suite
-npm run demo:list                 # list the demo tests and their tags
-npm run demo:test                 # run the demo suite against SauceDemo
-npm test                          # build, then run the unit tests
+- **Change-aware selection:** `select` maps each changed file to the specs it can affect, with a reason per pick, and switches to a full run for changes such as CI workflows, lockfiles and package manifests. See [Select Command](#select-command).
+- **Focused runs:** `run` runs only the picked specs, with typed results and exit codes. See [Run Command](#run-command).
+- **One summary:** `check` picks, runs and writes the Markdown summary, including suggested missing tests. See [Check Command](#check-command).
+- **Sticky PR comment:** `comment` posts or updates one comment per pull request, and skips fork pull requests itself. See [Comment Command](#comment-command).
+- **GitHub Action:** a composite action that runs check, rank, comment and the exit code mapping, with advisory mode on by default. See [GitHub Action](#github-action).
+- **Optional LLM ranking:** Anthropic, OpenAI or Gemini, off by default and advisory. See [LLM Ranking (Optional)](#llm-ranking-optional).
+- **Guards:** config size and count limits, a Playwright kill timeout capped at 30 minutes, and no API key in the Playwright step unless the workflow sets `llm: true`.
+
+---
+
+## How it works
+
+```
+  pull request diff (git refs or a saved diff)
+        │
+  diff      list the changed files and classify each one (spec, test-support, lockfile, docs, ...)
+  select    map files to specs through imports, tags and config; full suite for CI, lockfile or config changes
+  run       Playwright on the picked specs only, always with --forbid-only
+  check     one Markdown summary: verdict, per-spec table, suggested missing tests
+  rank      optional and advisory: LLM ordering, after Playwright has exited
+  comment   post or update the sticky PR comment
 ```
 
-## Demo Suite
+Each step is its own command, so you can stop after `select` to only see what would run.
 
-[SauceDemo](https://www.saucedemo.com) is a public practice site and not our code. The suite in `demo/saucedemo/` gives later PRs a small, real Playwright project to pick tests from.
-
-| Feature Folder | Tag | Covers |
-| --- | --- | --- |
-| `tests/login/` | `@login` | Standard login and the locked out user error |
-| `tests/inventory/` | `@inventory` | Sorting products by price and by name |
-| `tests/cart/` | `@cart` | Adding and removing a product |
-| `tests/checkout/` | `@checkout` | Completing an order and the required first name check |
-
-Layout rules:
-
-- One Page Object per feature in `pages/<feature>-page.ts`, with a PascalCase class.
-- One spec per feature in `tests/<feature>/<feature>.spec.ts`, wrapped in one `test.describe` with its feature tag.
-- The cart and checkout specs both import `CartPage`, so a change to it affects both.
-- Retries stay at 0 so a flaky test is never hidden.
-- The only credentials are the public demo ones printed on the SauceDemo login page.
-
-Run one feature by tag:
-
-```bash
-npx playwright test -c demo/saucedemo/playwright.config.ts --grep @cart
-```
+---
 
 ## Diff Command
 
@@ -1118,6 +1175,8 @@ Only a 403 on the write is skipped. A 403 on reading the comments or on `GET /us
 - A dry run reads the comments, so it needs the token too.
 - Any message that held the token would show `***` in its place; the tests check that no output holds it.
 
+---
+
 ## GitHub Action
 
 ### Action Usage
@@ -1322,6 +1381,66 @@ Still open, for the live checks on throwaway pull requests:
 
 Not confirmed and not live checked: the `<app-slug>[bot]` login and `Bot` type of an App token's comments, `GET /user` with a fine-grained personal access token, and that GitHub logins ignore case.
 
+---
+
+## Configuration
+
+`qa-core-prcheck.config.json` at the repository root is optional. Its keys are `playwrightDir`, `areas`, `fullSuiteOn`, `ignore` and `llm`; the defaults, limits and error messages are in [Config File](#config-file) under Select Command. LLM settings and environment variables are in [LLM Config](#llm-config). Action inputs are in [Action Inputs](#action-inputs).
+
+## Platform notes
+
+- **CLI:** supported on Linux, Windows and macOS. CI runs the CLI tests, the rule eval and a packed-package smoke test on `ubuntu-latest`, `windows-latest` and `macos-latest`.
+- **GitHub Action:** Linux only, because its steps are bash. This repo runs it on `ubuntu-24.04`, because Playwright 1.60.0 cannot install Chromium on the current `ubuntu-latest` image.
+- **git:** needed for `diff`, `select`, `run` and `check` with `--base`. Use `fetch-depth: 0` in Actions; see [Shallow Clones](#shallow-clones).
+- **Browsers:** Chromium for Playwright is only needed to run tests, directly or through `run` or `check`.
+
+---
+
+## Working On This Repo
+
+To work on this repo itself:
+
+```bash
+npm ci                            # install pinned dependencies
+npx playwright install chromium   # browser for the demo suite
+npm run demo:list                 # list the demo tests and their tags
+npm run demo:test                 # run the demo suite against SauceDemo
+npm test                          # build, then run the unit tests
+```
+
+## Demo Suite
+
+[SauceDemo](https://www.saucedemo.com) is a public practice site and not our code. The suite in `demo/saucedemo/` gives later PRs a small, real Playwright project to pick tests from.
+
+| Feature Folder | Tag | Covers |
+| --- | --- | --- |
+| `tests/login/` | `@login` | Standard login and the locked out user error |
+| `tests/inventory/` | `@inventory` | Sorting products by price and by name |
+| `tests/cart/` | `@cart` | Adding and removing a product |
+| `tests/checkout/` | `@checkout` | Completing an order and the required first name check |
+
+Layout rules:
+
+- One Page Object per feature in `pages/<feature>-page.ts`, with a PascalCase class.
+- One spec per feature in `tests/<feature>/<feature>.spec.ts`, wrapped in one `test.describe` with its feature tag.
+- The cart and checkout specs both import `CartPage`, so a change to it affects both.
+- Retries stay at 0 so a flaky test is never hidden.
+- The only credentials are the public demo ones printed on the SauceDemo login page.
+
+Run one feature by tag:
+
+```bash
+npx playwright test -c demo/saucedemo/playwright.config.ts --grep @cart
+```
+
+## Documentation
+
+| Doc | For |
+|---|---|
+| [docs/release-acceptance.md](docs/release-acceptance.md) | release acceptance checks |
+| [action.yml](action.yml) | the composite action and its inputs |
+| [CHANGELOG.md](CHANGELOG.md) | release notes |
+
 ## Roadmap
 
 - PR 1: scaffold and demo suite (done)
@@ -1341,10 +1460,18 @@ Not confirmed and not live checked: the `<app-slug>[bot]` login and `Bot` type o
 - v0.2.0: released 2026-11-09, npm and GitHub Release (done)
 - v0.2.1: docs-only patch, so the README on the npm page says the release is published (done)
 
+## Contributing
+
+Found a bug or have an idea? Open an issue. We review pull requests case by case.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
 ---
 
-Built by [SprintSynergy](https://sprintsynergy.com) and maintained by [Muhammad Usman](https://linkedin.com/in/sdet-muhammadusman).
+<p align="center">
+  <strong>Built by <a href="https://sprintsynergy.com">SprintSynergy</a></strong><br/>
+  <sub>SprintSynergy is an AI-based QA automation company: AI testing agents plus our QA team.</sub><br/>
+  <sub>Maintained by <a href="https://linkedin.com/in/sdet-muhammadusman">Muhammad Usman</a>.</sub>
+</p>
